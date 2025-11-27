@@ -67,6 +67,44 @@ const getConsultationCollection = (dbInstance) => {
     return collection(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'consultations');
 };
 
+// Lowongan Kerja (Loker)
+const getJobsCollection = (dbInstance) => {
+  const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  return collection(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'jobs');
+};
+
+// Produk Alumni
+const getProductsCollection = (dbInstance) => {
+  const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  return collection(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'products');
+};
+
+// --- TAMBAHAN HELPER KOLEKSI GALERI ---
+const getGalleryCollection = (dbInstance) => {
+  const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  return collection(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'gallery');
+};
+
+// Ubah berbagai URL Google Drive menjadi URL gambar yang bisa ditampilkan
+const convertDriveImage = (url) => {
+  // Kalau belum ada / kosong → langsung pakai gambar default jabat tangan
+  if (!url) {
+    return 'https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop';
+  }
+
+  // Ambil FILE_ID dari beberapa pola URL:
+  // - https://drive.google.com/open?id=FILE_ID
+  // - https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+  // - ...&id=FILE_ID
+  const match = url.match(/(?:\/file\/d\/|[?&]id=)([a-zA-Z0-9_-]+)/);
+  if (!match) return url; // kalau bukan link drive, pakai apa adanya
+
+  const id = match[1];
+  // Link langsung ke konten file
+  return `https://drive.google.com/uc?export=view&id=${id}`;
+};
+
+
 // 1. URL DATABASE PUBLIK (Google Sheet - Output CSV)
 const JADWAL_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTnz2hzmeoVMrKYwKuc1dOvW3mmkOSoPkug2UjSUwwAUKj3HrG5rvXMwd5bbuWKGI3MOOLHf-JxlY5U/pub?gid=0&single=true&output=csv";
 const GALERI_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQZibbv1GsZEIS2VpQ7i88LWtq2TjQVMsePWxQxJQ3lbdbWY9k69b00eMdgTJzYQ4jY_bEu_KHLrmJ3/pub?gid=1399593239&single=true&output=csv"; 
@@ -207,17 +245,22 @@ const parseCSV = (text) => {
   }).filter(Boolean);
 };
 
-// Helper untuk konversi URL Drive ke Embed (Thumbnail)
+// Ubah URL Google Drive (open?id=FILE_ID atau file/d/FILE_ID/...) menjadi URL yang bisa di-embed di <img>
 const convertToEmbedLink = (url) => {
   if (!url) return null;
-  let id = null;
-  let match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)\//);
-  if (match) id = match[1];
-  if (!id) { match = url.match(/[?&]id=([a-zA-Z0-9_-]+)/); if (match) id = match[1]; }
-  if (!id) { match = url.match(/\/open\?id=([a-zA-Z0-9_-]+)/); if (match) id = match[1]; }
-  if (id) return `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
-  return url;
+
+  // 1. Ambil ID File dari link Google Drive
+  const idMatch = url.match(/(?:[?&]id=|\/file\/d\/)([a-zA-Z0-9_-]+)/);
+
+  if (!idMatch) return url; // Kalau bukan link drive, biarkan apa adanya
+
+  const fileId = idMatch[1];
+
+  // 2. GUNAKAN FORMAT "THUMBNAIL" (Trik Anti-Blokir)
+  // parameter "&sz=w1000" artinya kita minta gambar ukuran lebar 1000px (HD)
+  return `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`;
 };
+
 
 // --- NORMALISASI DATA ---
 
@@ -646,106 +689,122 @@ function ConsultationAdminView({ dbInstance, onBack }) {
     );
 }
 
-// --- DASHBOARD ADMIN ---
+// ==============================================================================
+// 1. KOMPONEN UTAMA DASHBOARD PAGE (VERSI FINAL: GFORM LINK + HAPUS ITEM)
+// ==============================================================================
 function DashboardPage({ user, pesertaData, kejuruanOptions, isLoading, error, onBackToHome }) {
     const [view, setView] = useState('main');
+    
+    // --- STATE DATA ---
     const [pendingComments, setPendingComments] = useState([]);
+    const [approvedComments, setApprovedComments] = useState([]);
+    
+    const [pendingJobs, setPendingJobs] = useState([]);
+    const [approvedJobs, setApprovedJobs] = useState([]);
+    
+    const [pendingProducts, setPendingProducts] = useState([]);
+    const [approvedProducts, setApprovedProducts] = useState([]);
+    
+    // STATE GALERI (Hanya List Item untuk dihapus, TIDAK ADA input manual lagi)
+    const [galleryItems, setGalleryItems] = useState([]);
     const [isModerating, setIsModerating] = useState(false);
 
+    // --- 2. FETCH DATA REALTIME ---
     useEffect(() => {
-        if (!db || !user) return; // FIX: Guard clause
+        if (!db || !user) return;
+
+        // A. KOMENTAR
+        const u1 = onSnapshot(query(getCommentsCollection(db), where("status", "==", "pending")), (s) => setPendingComments(s.docs.map(d => ({id:d.id, ...d.data()}))));
+        const u2 = onSnapshot(query(getCommentsCollection(db), where("status", "==", "approved"), orderBy("createdAt", "desc")), (s) => setApprovedComments(s.docs.map(d => ({id:d.id, ...d.data()}))));
         
-        // FIX: Gunakan helper getCommentsCollection
-        const q = query(getCommentsCollection(db), where("status", "==", "pending"));
+        // B. LOKER
+        const u3 = onSnapshot(query(getJobsCollection(db), where("moderationStatus", "==", "pending")), (s) => setPendingJobs(s.docs.map(d => ({id:d.id, ...d.data()}))));
+        const u4 = onSnapshot(query(getJobsCollection(db), where("moderationStatus", "==", "approved")), (s) => setApprovedJobs(s.docs.map(d => ({id:d.id, ...d.data()}))));
         
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const comments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            comments.sort((a, b) => {
-                const timeA = a.createdAt ? a.createdAt.seconds : Math.floor(Date.now() / 1000) + 1000; 
-                const timeB = b.createdAt ? b.createdAt.seconds : Math.floor(Date.now() / 1000) + 1000;
-                return timeB - timeA;
-            });
-            setPendingComments(comments);
-        }, (error) => console.error("Error fetch pending comments:", error));
-        return () => unsubscribe();
+        // C. PRODUK
+        const u5 = onSnapshot(query(getProductsCollection(db), where("moderationStatus", "==", "pending")), (s) => setPendingProducts(s.docs.map(d => ({id:d.id, ...d.data()}))));
+        const u6 = onSnapshot(query(getProductsCollection(db), where("moderationStatus", "==", "approved")), (s) => setApprovedProducts(s.docs.map(d => ({id:d.id, ...d.data()}))));
+        
+        // D. GALERI (Ambil dari Firestore agar bisa dihapus)
+        const u7 = onSnapshot(query(getGalleryCollection(db), orderBy("createdAt", "desc")), (s) => setGalleryItems(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+
+        return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); };
     }, [user]);
 
-    const handleApprove = async (id) => {
-        if (!db) return;
+    // --- 3. ACTION HANDLERS ---
+
+    // Hapus Permanen (Generic untuk semua koleksi)
+    const handleDelete = async (collectionFunc, id, name) => {
+        if (!window.confirm(`⚠️ Yakin ingin MENGHAPUS PERMANEN "${name}"? Data tidak bisa kembali.`)) return;
         setIsModerating(true);
-        try {
-            // FIX: Gunakan helper dengan path yang benar
-            await updateDoc(doc(getCommentsCollection(db), id), { status: "approved" });
-        } catch (e) { console.error(e); } finally { setIsModerating(false); }
+        try { await deleteDoc(doc(collectionFunc(db), id)); } 
+        catch (e) { console.error(e); alert("Gagal menghapus data."); } 
+        finally { setIsModerating(false); }
     };
 
-    const handleReject = async (id) => {
-        if (!db) return;
+    // Approve / Update Status
+    const handleStatusUpdate = async (collectionFunc, id, field, val) => {
         setIsModerating(true);
-        try {
-            // FIX: Gunakan helper dengan path yang benar
-            await deleteDoc(doc(getCommentsCollection(db), id));
-        } catch (e) { console.error(e); } finally { setIsModerating(false); }
+        try { 
+            await updateDoc(doc(collectionFunc(db), id), { 
+                [field]: val, 
+                approvedAt: serverTimestamp(),
+                approvedBy: user?.email || 'admin' 
+            }); 
+        } 
+        catch (e) { console.error(e); } 
+        finally { setIsModerating(false); }
     };
 
-    if (view === 'consultation') {
-        return (
-             <section className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
-                 <div className="max-w-6xl mx-auto px-4">
-                     <ConsultationAdminView
-                         dbInstance={db}
-                         onBack={() => setView('main')}
-                     />
-                 </div>
-             </section>
-        );
-    }
-    
-    if (view === 'peserta') {
+    // --- 4. RENDER SUB-VIEWS ---
+
+    // VIEW 1: MANAJEMEN GALERI (UPDATED: HANYA TOMBOL LINK & LIST HAPUS)
+    if (view === 'gallery') {
         return (
             <section className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
                 <div className="max-w-6xl mx-auto px-4">
-                    <PesertaDatabaseView
-                        pesertaData={pesertaData}
-                        isLoading={isLoading}
-                        error={error}
-                        onBack={() => setView('main')}
-                        kejuruanOptions={kejuruanOptions}
-                    />
-                </div>
-            </section>
-        );
-    }
+                    <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+                        <div>
+                            <button onClick={() => setView('main')} className="text-emerald-400 mb-2 flex items-center gap-2 hover:underline">← Kembali ke Dashboard</button>
+                            <h2 className="text-2xl font-bold text-white">Manajemen Galeri Foto</h2>
+                        </div>
+                        
+                        {/* TOMBOL INPUT KHUSUS KE GOOGLE FORM */}
+                        <a href={FORM_GALERI_URL} target="_blank" rel="noreferrer" className="px-6 py-3 bg-pink-600 hover:bg-pink-500 text-white text-sm font-bold rounded-xl shadow-lg flex items-center gap-2 transition-all transform hover:scale-105 hover:shadow-pink-500/20">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                            <span>Input Galeri Baru (Via GForm)</span>
+                        </a>
+                    </div>
 
-    if (view === 'moderasi') {
-        return (
-            <section className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
-                <div className="max-w-4xl mx-auto px-4">
-                    <button onClick={() => setView('main')} className="text-emerald-400 mb-4 flex items-center gap-2 hover:underline">
-                        ← Kembali ke Dashboard
-                    </button>
-                    <h2 className="text-2xl font-bold text-white mb-6">Moderasi Komentar ({pendingComments.length})</h2>
-                    {pendingComments.length === 0 ? (
-                        <div className="text-center p-10 bg-slate-900 rounded-xl border border-slate-800 text-slate-500">
-                            Tidak ada komentar baru yang perlu dimoderasi.
+                    {galleryItems.length === 0 ? (
+                        <div className="text-center p-12 bg-slate-900 border border-slate-800 rounded-xl">
+                            <p className="text-slate-500">Belum ada foto yang tampil. Silakan input via tombol di atas.</p>
                         </div>
                     ) : (
-                        <div className="space-y-4">
-                            {pendingComments.map((comment) => (
-                                <div key={comment.id} className="bg-slate-900 border border-slate-700 p-4 rounded-xl flex flex-col md:flex-row gap-4 justify-between items-start md:items-center animate-fade-in">
-                                    <div>
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <span className="font-bold text-emerald-400 text-sm">{comment.name || "Anonim"}</span>
-                                            <span className="text-[10px] text-slate-500">
-                                                {comment.createdAt ? new Date(comment.createdAt.seconds * 1000).toLocaleDateString() : "Baru saja"}
-                                            </span>
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                            {galleryItems.map(item => (
+                                <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden group relative hover:border-pink-500/50 transition-all">
+                                    <div className="h-40 bg-slate-800 relative">
+                                        <img 
+                                            src={convertToEmbedLink(item.src) || "https://placehold.co/600x400?text=No+Image"} 
+                                            alt={item.title}
+                                            referrerPolicy="no-referrer"
+                                            className="w-full h-full object-cover"
+                                            onError={(e) => e.target.src = "https://placehold.co/600x400?text=Error"}
+                                        />
+                                        {/* Overlay Judul */}
+                                        <div className="absolute bottom-0 left-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2">
+                                            <p className="text-[10px] font-bold text-white line-clamp-2">{item.title}</p>
                                         </div>
-                                        <p className="text-slate-200 text-sm">{comment.comment || comment.text}</p>
                                     </div>
-                                    <div className="flex gap-2 shrink-0">
-                                        <button onClick={() => handleApprove(comment.id)} disabled={isModerating} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-white text-xs font-bold transition-colors shadow-lg">Terima</button>
-                                        <button onClick={() => handleReject(comment.id)} disabled={isModerating} className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg text-white text-xs font-bold transition-colors shadow-lg">Hapus</button>
-                                    </div>
+                                    
+                                    {/* Tombol Hapus */}
+                                    <button 
+                                        onClick={() => handleDelete(getGalleryCollection, item.id, item.title)} 
+                                        className="w-full py-2 bg-red-900/20 text-red-400 border-t border-slate-800 hover:bg-red-600 hover:text-white text-[10px] font-bold uppercase transition-all"
+                                    >
+                                        Hapus Permanen
+                                    </button>
                                 </div>
                             ))}
                         </div>
@@ -755,61 +814,248 @@ function DashboardPage({ user, pesertaData, kejuruanOptions, isLoading, error, o
         );
     }
 
-    // Main Dashboard View
+    // VIEW 2: MODERASI KOMENTAR
+    if (view === 'moderasi') {
+        return (
+            <section className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
+                <div className="max-w-5xl mx-auto px-4">
+                    <button onClick={() => setView('main')} className="text-emerald-400 mb-4 flex items-center gap-2 hover:underline">← Kembali ke Dashboard</button>
+                    
+                    {/* Pending */}
+                    <h2 className="text-xl font-bold text-yellow-400 mb-4 border-b border-white/10 pb-2">Moderasi Komentar Baru ({pendingComments.length})</h2>
+                    <div className="space-y-4 mb-10">
+                        {pendingComments.length === 0 ? <p className="text-slate-600 text-sm italic">Tidak ada komentar baru.</p> : pendingComments.map((comment) => (
+                            <div key={comment.id} className="bg-slate-900 border border-yellow-500/30 p-4 rounded-xl flex justify-between items-center gap-4 animate-fade-in">
+                                <div>
+                                    <div className="font-bold text-emerald-400 text-sm">{comment.name} <span className="text-slate-500 font-normal">({comment.date})</span></div>
+                                    <p className="text-slate-200 text-sm mt-1">{comment.comment}</p>
+                                </div>
+                                <div className="flex gap-2 shrink-0">
+                                    <button onClick={() => handleStatusUpdate(getCommentsCollection, comment.id, "status", "approved")} disabled={isModerating} className="px-3 py-1 bg-emerald-600 rounded text-xs font-bold text-white hover:bg-emerald-500">Terima</button>
+                                    <button onClick={() => handleDelete(getCommentsCollection, comment.id, "Komentar")} disabled={isModerating} className="px-3 py-1 bg-red-600 rounded text-xs font-bold text-white hover:bg-red-500">Hapus</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Approved */}
+                    <h2 className="text-xl font-bold text-emerald-500 mb-4 border-b border-white/10 pb-2">Komentar Tayang ({approvedComments.length})</h2>
+                    <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                        {approvedComments.map((comment) => (
+                            <div key={comment.id} className="bg-slate-900/50 border border-slate-800 p-3 rounded-lg flex justify-between items-center gap-4">
+                                <div className="flex-1">
+                                    <div className="font-bold text-slate-300 text-xs">{comment.name} <span className="text-slate-500">({comment.date})</span></div>
+                                    <p className="text-slate-400 text-xs mt-1 line-clamp-2">{comment.comment}</p>
+                                </div>
+                                <button onClick={() => handleDelete(getCommentsCollection, comment.id, "Komentar")} disabled={isModerating} className="px-3 py-1 bg-slate-800 border border-slate-700 rounded text-[10px] font-bold text-red-400 hover:bg-red-900/30 hover:border-red-500 shrink-0">Hapus</button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </section>
+        );
+    }
+
+    // VIEW 3: LOKER & PRODUK
+    if (view === 'lokerProduk') {
+        return (
+            <section className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
+                <div className="max-w-6xl mx-auto px-4">
+                    <button onClick={() => setView('main')} className="text-emerald-400 mb-4 flex items-center gap-2 hover:underline">← Kembali ke Dashboard</button>
+                    <h2 className="text-2xl font-bold text-white mb-2">Manajemen Loker & Produk</h2>
+                    <p className="text-xs text-slate-400 mb-8">Setujui item baru atau hapus item lama yang sudah kadaluarsa.</p>
+
+                    {/* GROUP LOKER */}
+                    <div className="mb-12">
+                        <h3 className="text-xl font-bold text-emerald-300 mb-4 flex items-center gap-2">Lowongan Kerja</h3>
+                        
+                        <div className="mb-6">
+                            <h4 className="text-sm font-bold text-yellow-400 mb-3 uppercase tracking-wider">Menunggu Persetujuan ({pendingJobs.length})</h4>
+                            {pendingJobs.length === 0 ? <p className="text-slate-600 text-xs italic">Tidak ada lowongan pending.</p> : 
+                            <div className="grid md:grid-cols-2 gap-4">
+                                {pendingJobs.map(job => (
+                                    <AdminCardItem key={job.id} item={job} type="loker" isPending={true} 
+                                        onApprove={() => handleStatusUpdate(getJobsCollection, job.id, "moderationStatus", "approved")} 
+                                        onDelete={() => handleDelete(getJobsCollection, job.id, job.title)} 
+                                        disabled={isModerating} 
+                                    />
+                                ))}
+                            </div>}
+                        </div>
+
+                        <div>
+                            <h4 className="text-sm font-bold text-emerald-600 mb-3 uppercase tracking-wider">Sedang Tayang ({approvedJobs.length})</h4>
+                            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {approvedJobs.map(job => (
+                                    <AdminCardItem key={job.id} item={job} type="loker" isPending={false} 
+                                        onDelete={() => handleDelete(getJobsCollection, job.id, job.title)} 
+                                        disabled={isModerating} 
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="w-full h-px bg-slate-800 my-8"></div>
+
+                    {/* GROUP PRODUK */}
+                    <div>
+                        <h3 className="text-xl font-bold text-blue-400 mb-4 flex items-center gap-2">Produk Alumni</h3>
+                        
+                        <div className="mb-6">
+                            <h4 className="text-sm font-bold text-yellow-400 mb-3 uppercase tracking-wider">Menunggu Persetujuan ({pendingProducts.length})</h4>
+                            {pendingProducts.length === 0 ? <p className="text-slate-600 text-xs italic">Tidak ada produk pending.</p> : 
+                            <div className="grid md:grid-cols-2 gap-4">
+                                {pendingProducts.map(prod => (
+                                    <AdminCardItem key={prod.id} item={prod} type="produk" isPending={true} 
+                                        onApprove={() => handleStatusUpdate(getProductsCollection, prod.id, "moderationStatus", "approved")} 
+                                        onDelete={() => handleDelete(getProductsCollection, prod.id, prod.name)} 
+                                        disabled={isModerating} 
+                                    />
+                                ))}
+                            </div>}
+                        </div>
+
+                        <div>
+                            <h4 className="text-sm font-bold text-blue-600 mb-3 uppercase tracking-wider">Sedang Tayang ({approvedProducts.length})</h4>
+                            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {approvedProducts.map(prod => (
+                                    <AdminCardItem key={prod.id} item={prod} type="produk" isPending={false} 
+                                        onDelete={() => handleDelete(getProductsCollection, prod.id, prod.name)} 
+                                        disabled={isModerating} 
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        );
+    }
+    
+    // VIEW 4: CONSULTATION
+    if (view === 'consultation') {
+        return (
+             <section className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
+                 <div className="max-w-6xl mx-auto px-4">
+                     <ConsultationAdminView dbInstance={db} onBack={() => setView('main')} />
+                 </div>
+             </section>
+        );
+    }
+    
+    // VIEW 5: PESERTA
+    if (view === 'peserta') {
+        return (
+            <section className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
+                <div className="max-w-6xl mx-auto px-4">
+                    <PesertaDatabaseView pesertaData={pesertaData} isLoading={isLoading} error={error} onBack={() => setView('main')} kejuruanOptions={kejuruanOptions} />
+                </div>
+            </section>
+        );
+    }
+
+    // MAIN VIEW (MENU UTAMA DASHBOARD)
     return (
         <section className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
             <div className="max-w-6xl mx-auto px-4">
                 <div className="mb-8 flex justify-between items-center">
                     <div>
-                        <h1 className="text-2xl md:text-3xl font-bold text-white">Halo, {user.email || "Petugas BLK"}</h1>
-                        <p className="text-slate-400">Dashboard Pegawai - UPT BLK Kota Magelang</p>
+                        <h1 className="text-2xl md:text-3xl font-bold text-white">Dashboard Admin</h1>
+                        <p className="text-slate-400">Selamat datang, {user.email || "Petugas"}</p>
                     </div>
                 </div>
-                {!db && <div className="mb-6 p-4 bg-red-900/20 border border-red-500 rounded-lg text-red-200 text-sm font-bold animate-pulse">⚠️ Config Firebase Belum Diisi! Fitur dinamis tidak dapat digunakan.</div>}
+                {!db && <div className="mb-6 p-4 bg-red-900/20 border border-red-500 rounded-lg text-red-200 text-sm font-bold animate-pulse">⚠️ Database Belum Terkoneksi.</div>}
                 
-                {/* GRID UTAMA (4 KOLOM) */}
-                <div className="grid md:grid-cols-4 gap-6">
-                    {/* MODERASI KOMENTAR */}
-                    <button onClick={() => setView('moderasi')} className="bg-slate-900 p-6 rounded-xl border border-slate-800 hover:border-emerald-500/50 transition-all cursor-pointer text-left group relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-24 w-24 text-emerald-500" fill="currentColor" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
-                        </div>
-                        <div className="flex justify-between items-start mb-4 relative z-10">
-                            <div className="w-10 h-10 bg-emerald-500/10 rounded-lg flex items-center justify-center text-emerald-400"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg></div>
-                            {pendingComments.length > 0 && <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full animate-bounce shadow-lg">{pendingComments.length} Baru</span>}
-                        </div>
-                        <h3 className="text-lg font-bold text-white mb-1 group-hover:text-emerald-400 transition-colors relative z-10">Moderasi Komentar</h3>
-                        <p className="text-xs text-slate-400 relative z-10">Setujui komentar publik.</p>
-                    </button>
-                    
-                    {/* TIKET KONSULTASI */}
-                      <button onClick={() => setView('consultation')} className="bg-slate-900 p-6 rounded-xl border border-slate-800 hover:border-yellow-500/50 transition-all cursor-pointer text-left group">
-                        <div className="w-10 h-10 bg-yellow-500/10 rounded-lg flex items-center justify-center mb-4 text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 4H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-2m-4-1v8m0 0l-3-3m3 3l3-3M3 17h18" /></svg></div>
-                        <h3 className="text-lg font-bold text-white mb-1 group-hover:text-yellow-400 transition-colors">Tiket Konsultasi Alumni</h3>
-                        <p className="text-xs text-slate-400">Balas pertanyaan yang diajukan alumni.</p>
-                    </button>
+                <div className="grid md:grid-cols-3 lg:grid-cols-5 gap-4">
+                    <DashButton icon="💬" label="Komentar" count={pendingComments.length} onClick={() => setView('moderasi')} color="emerald" />
+                    <DashButton icon="💼" label="Loker & Produk" count={pendingJobs.length + pendingProducts.length} onClick={() => setView('lokerProduk')} color="blue" />
+                    <DashButton icon="📷" label="Manajemen Galeri" count={galleryItems.length} onClick={() => setView('gallery')} color="pink" />
+                    <DashButton icon="🙋‍♂️" label="Konsultasi" count={0} onClick={() => setView('consultation')} color="yellow" />
+                    <DashButton icon="👥" label="Data Peserta" count={0} onClick={() => setView('peserta')} color="purple" />
+                </div>
 
-                    {/* DATA PESERTA */}
-                    <button onClick={() => setView('peserta')} className="bg-slate-900 p-6 rounded-xl border border-slate-800 hover:border-blue-500/50 transition-all cursor-pointer text-left group">
-                        <div className="w-10 h-10 bg-blue-500/10 rounded-lg flex items-center justify-center mb-4 text-blue-400"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg></div>
-                        <h3 className="text-lg font-bold text-white mb-1 group-hover:text-blue-400 transition-colors">Data Peserta</h3>
-                        <p className="text-xs text-slate-400">Lihat & filter database peserta.</p>
-                    </button>
-                    
-                    {/* INPUT FORM DROP-DOWN (Grup Link Input) */}
-                    <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 text-left group">
-                        <div className="w-10 h-10 bg-purple-500/10 rounded-lg flex items-center justify-center mb-4 text-purple-400"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg></div>
-                        <h3 className="text-lg font-bold text-white mb-3 group-hover:text-purple-400 transition-colors">Link Input Data</h3>
-                        <div className="space-y-2 text-sm text-slate-400">
-                             <a href={FORM_GALERI_URL} target="_blank" rel="noreferrer" className="block text-xs font-bold text-purple-400 hover:text-white transition-colors">→ Input Galeri</a>
-                             <a href={FORM_LOKER_URL} target="_blank" rel="noreferrer" className="block text-xs font-bold text-purple-400 hover:text-white transition-colors">→ Input Lowongan Kerja</a>
-                             <a href={FORM_PRODUK_URL} target="_blank" rel="noreferrer" className="block text-xs font-bold text-purple-400 hover:text-white transition-colors">→ Input Produk Alumni</a>
-                        </div>
+                <div className="mt-8 bg-slate-900 p-6 rounded-xl border border-slate-800">
+                    <h3 className="text-white font-bold mb-4">Link Cepat Input Data</h3>
+                    <div className="flex flex-wrap gap-4 text-sm">
+                        <a href={FORM_LOKER_URL} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-4 py-2 bg-slate-800 rounded-lg text-blue-400 hover:text-white hover:bg-blue-600 transition-all border border-slate-700">
+                            <span>💼</span> Input Loker
+                        </a>
+                        <a href={FORM_PRODUK_URL} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-4 py-2 bg-slate-800 rounded-lg text-blue-400 hover:text-white hover:bg-blue-600 transition-all border border-slate-700">
+                            <span>📦</span> Input Produk
+                        </a>
+                        <a href={FORM_GALERI_URL} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-4 py-2 bg-slate-800 rounded-lg text-pink-400 hover:text-white hover:bg-pink-600 transition-all border border-slate-700">
+                            <span>📷</span> Input Galeri
+                        </a>
                     </div>
-
                 </div>
             </div>
         </section>
+    );
+}
+
+// ==============================================================================
+// 2. KOMPONEN PENDUKUNG (ADMIN CARD ITEM - JANGAN LUPA DICOPY JUGA)
+// ==============================================================================
+function AdminCardItem({ item, type, isPending, onApprove, onDelete, disabled }) {
+    const imageUrl = item.image ? convertToEmbedLink(item.image) : (
+        type === 'loker' 
+        ? "https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop"
+        : "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop"
+    );
+
+    return (
+        <div className={`relative bg-slate-900 rounded-xl overflow-hidden border ${isPending ? 'border-yellow-500/40' : 'border-slate-800'} flex flex-col`}>
+            <div className="h-32 bg-slate-800 relative group">
+                 <img 
+                    src={imageUrl} 
+                    alt={item.title || item.name} 
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                    onError={(e) => e.target.src = "https://placehold.co/600x400/1e293b/FFFFFF?text=No+Image"}
+                />
+                {isPending && <div className="absolute top-2 right-2 bg-yellow-500 text-slate-900 text-[10px] font-bold px-2 py-0.5 rounded shadow">PENDING</div>}
+                {!isPending && <div className="absolute top-2 right-2 bg-emerald-500 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">AKTIF</div>}
+            </div>
+
+            <div className="p-3 flex-1 flex flex-col">
+                <h4 className="font-bold text-white text-sm line-clamp-1 mb-1" title={item.title || item.name}>{item.title || item.name}</h4>
+                <p className="text-xs text-slate-400 mb-3">{type === 'loker' ? item.company : `Oleh: ${item.alumni}`}</p>
+                
+                <div className="mt-auto flex gap-2 pt-2 border-t border-slate-800/50">
+                    {isPending && (
+                        <button onClick={onApprove} disabled={disabled} className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded transition-colors">
+                            Setujui
+                        </button>
+                    )}
+                    <button onClick={onDelete} disabled={disabled} className={`flex-1 py-1.5 ${isPending ? 'bg-red-600 hover:bg-red-500' : 'bg-slate-800 border border-slate-700 hover:bg-red-900/40 hover:border-red-500 text-red-400'} text-xs font-bold rounded transition-colors`}>
+                        {isPending ? 'Tolak' : 'Hapus'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ==============================================================================
+// 3. KOMPONEN PENDUKUNG (DASHBOARD BUTTON - JANGAN LUPA DICOPY JUGA)
+// ==============================================================================
+function DashButton({ icon, label, count, onClick, color }) {
+    const colors = {
+        emerald: "border-emerald-500/30 hover:border-emerald-500 group-hover:text-emerald-400",
+        blue: "border-blue-500/30 hover:border-blue-500 group-hover:text-blue-400",
+        yellow: "border-yellow-500/30 hover:border-yellow-500 group-hover:text-yellow-400",
+        purple: "border-purple-500/30 hover:border-purple-500 group-hover:text-purple-400",
+        pink: "border-pink-500/30 hover:border-pink-500 group-hover:text-pink-400",
+    };
+    return (
+        <button onClick={onClick} className={`bg-slate-900 p-5 rounded-xl border ${colors[color] || colors.emerald} hover:bg-slate-800 transition-all text-left relative group shadow-lg`}>
+            <div className="flex justify-between items-start mb-3">
+                <div className="text-3xl">{icon}</div>
+                {count > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-bounce shadow-md">{count}</span>}
+            </div>
+            <h3 className={`font-bold text-white text-sm ${colors[color]?.split(" ").pop()}`}>{label}</h3>
+        </button>
     );
 }
 
@@ -884,15 +1130,17 @@ function PesertaDatabaseView({ pesertaData, isLoading, error, onBack, kejuruanOp
   );
 }
 
-// --- KOMPONEN BERANDA ---
-function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryData, kejuruanOptions, isLoading, error }) {
-  const [galleryType, setGalleryType] = useState("foto");
+// --- KOMPONEN BERANDA (VERSI FINAL: GALERI GABUNG + NAVIGASI PANDUAN) ---
+function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryData, kejuruanOptions, isLoading, error, setCurrentPage }) {
+  // CATATAN: State 'galleryType' sudah DIHAPUS karena tidak dipakai lagi.
+  
   const [yearFilter, setYearFilter] = useState("berjalan");
   const [kejuruanFilter, setKejuruanFilter] = useState("Semua");
   const [statusFilter, setStatusFilter] = useState("Semua");
   const [selectedStatYear, setSelectedStatYear] = useState(new Date().getFullYear());
   const currentYear = new Date().getFullYear();
 
+  // --- LOGIKA FILTER JADWAL ---
   const filteredSchedule = allScheduleData.filter(item => {
     const status = getScheduleStatus(item.startdate, item.enddate);
     const itemYear = new Date(item.startdate).getFullYear();
@@ -904,7 +1152,11 @@ function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryDa
     return true;
   });
   
-  const filteredGallery = galleryData.filter(item => item.type === galleryType);
+  // --- LOGIKA GALERI (AMBIL SEMUA) ---
+  // Kita tidak lagi memfilter berdasarkan type. Semua data diambil.
+  const displayGallery = galleryData; 
+
+  // --- LOGIKA STATISTIK ---
   const availableStatYears = [...new Set(allStatsData.map(row => parseInt(row.tahun)))].filter(Boolean).sort((a, b) => b - a);
   const statsForSelectedYear = allStatsData.find(row => parseInt(row.tahun) === selectedStatYear);
   
@@ -924,71 +1176,48 @@ function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryDa
 
   return (
     <>
-      
-<section id="hero" className="pt-28 md:pt-40 pb-20 relative overflow-hidden min-h-[80vh] flex items-center">
-  {/* Background Effects */}
-  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-emerald-500/10 rounded-full blur-[120px] -z-10 pointer-events-none"></div>
-  
-  {/* Container kita perlebar sedikit (max-w-7xl) agar muat 3 kolom */}
-  <div className="max-w-7xl mx-auto px-4 w-full">
-    
-    {/* GRID LAYOUT: Mobile (1 kolom) -> Laptop (3 kolom) */}
-    <div className="grid lg:grid-cols-12 gap-8 items-center">
-
-      {/* 1. POSISI KIRI: LOGO (Mengambil 3 dari 12 bagian) */}
-      <div className="lg:col-span-3 flex justify-center lg:justify-start order-1 animate-fade-in-up">
-        <img
-          src="https://i.imgur.com/auZvlcZ.png" // Logo Emblem Emas
-          alt="Emblem SELARAS"
-          // Ukuran disesuaikan agar pas di kolom kiri
-          className="w-40 h-auto md:w-56 lg:w-full max-w-[250px] object-contain drop-shadow-[0_0_25px_rgba(16,185,129,0.4)] hover:scale-105 transition-transform duration-500"
-        />
-      </div>
-
-      {/* 2. POSISI TENGAH: TEKS (Mengambil 5 dari 12 bagian) */}
-      <div className="lg:col-span-5 text-center order-2 animate-fade-in-up delay-100 relative z-10">
-          <div className="inline-block px-4 py-1 mb-4 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] md:text-xs font-bold tracking-widest uppercase">
-            PORTAL RESMI BLK KOTA MAGELANG
-          </div>
-          <h1 className="text-4xl md:text-6xl font-extrabold mb-4 text-white tracking-tight drop-shadow-lg leading-tight">
-            SELARAS
-          </h1>
-          <p className="text-sm md:text-lg text-emerald-100 mb-6 font-medium leading-relaxed">
-            Sistem Elektronik Layanan Administrasi teRpadu dAn Smart
-          </p>
-          <p className="text-xs md:text-sm text-slate-400 mb-8 max-w-md mx-auto">
-            Wujudkan kompetensi unggul dan karir cemerlang bersama pelatihan vokasi berstandar nasional.
-          </p>
-          
-          <div className="flex flex-wrap gap-3 justify-center">
-             <a href="#jadwal" className="px-6 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold shadow-lg shadow-emerald-500/30 transition-all transform hover:-translate-y-1">
-               Lihat Jadwal
-             </a>
-             <a href="https://s.id/daftarBLK" target="_blank" rel="noreferrer" className="px-6 py-2.5 rounded-full border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 text-sm font-bold transition-all">
-               Daftar Sekarang
-             </a>
-          </div>
-      </div>
-
-      {/* 3. POSISI KANAN: VIDEO (Mengambil 4 dari 12 bagian) */}
-      <div className="lg:col-span-4 order-3 animate-fade-in-up delay-200">
-        <div className="bg-slate-800/50 backdrop-blur-sm rounded-2xl p-2 shadow-2xl border border-white/10 transform rotate-2 hover:rotate-0 transition-all duration-500 group">
-            <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-inner group-hover:shadow-[0_0_30px_rgba(16,185,129,0.2)] transition-shadow">
-              <video controls className="w-full h-full object-cover" autoPlay loop muted playsInline>
-                <source src="https://i.imgur.com/GUHA593.mp4" type="video/mp4" />
-              </video>
+      {/* 1. HERO SECTION */}
+      <section id="hero" className="pt-28 md:pt-40 pb-20 relative overflow-hidden min-h-[80vh] flex items-center">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-emerald-500/10 rounded-full blur-[120px] -z-10 pointer-events-none"></div>
+        <div className="max-w-7xl mx-auto px-4 w-full">
+          <div className="grid lg:grid-cols-12 gap-8 items-center">
+            
+            {/* Logo Kiri */}
+            <div className="lg:col-span-3 flex justify-center lg:justify-start order-1 animate-fade-in-up">
+              <img src="https://i.imgur.com/auZvlcZ.png" alt="Emblem SELARAS" className="w-40 h-auto md:w-56 lg:w-full max-w-[250px] object-contain drop-shadow-[0_0_25px_rgba(16,185,129,0.4)] hover:scale-105 transition-transform duration-500" />
             </div>
-            {/* Hiasan kecil di bawah video */}
-            <div className="text-center mt-2">
-                <p className="text-[10px] text-slate-400 uppercase tracking-widest">Profil Pelatihan</p>
+
+            {/* Teks Tengah */}
+            <div className="lg:col-span-5 text-center order-2 animate-fade-in-up delay-100 relative z-10">
+                <div className="inline-block px-4 py-1 mb-4 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] md:text-xs font-bold tracking-widest uppercase">PORTAL RESMI BLK KOTA MAGELANG</div>
+                <h1 className="text-4xl md:text-6xl font-extrabold mb-4 text-white tracking-tight drop-shadow-lg leading-tight">SELARAS</h1>
+                <p className="text-sm md:text-lg text-emerald-100 mb-6 font-medium leading-relaxed">Sistem Elektronik Layanan Administrasi teRpadu dAn Smart</p>
+                <p className="text-xs md:text-sm text-slate-400 mb-8 max-w-md mx-auto">Wujudkan kompetensi unggul dan karir cemerlang bersama pelatihan vokasi berstandar nasional.</p>
+                
+                {/* Tombol Aksi */}
+                <div className="flex flex-wrap gap-3 justify-center">
+                   <a href="#jadwal" className="px-6 py-2.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold shadow-lg shadow-emerald-500/30 transition-all transform hover:-translate-y-1">Lihat Jadwal</a>
+                   {/* UPDATE: Tombol Daftar mengarah ke Panduan */}
+                   <button onClick={() => setCurrentPage("panduan")} className="px-6 py-2.5 rounded-full border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 text-sm font-bold transition-all cursor-pointer">Daftar Sekarang</button>
+                </div>
             </div>
+
+            {/* Video Kanan */}
+            <div className="lg:col-span-4 order-3 animate-fade-in-up delay-200">
+              <div className="bg-slate-800/50 backdrop-blur-sm rounded-2xl p-2 shadow-2xl border border-white/10 transform rotate-2 hover:rotate-0 transition-all duration-500 group">
+                  <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-slate-900 shadow-inner group-hover:shadow-[0_0_30px_rgba(16,185,129,0.2)] transition-shadow">
+                    <video controls className="w-full h-full object-cover" autoPlay loop muted playsInline>
+                      <source src="https://i.imgur.com/GUHA593.mp4" type="video/mp4" />
+                    </video>
+                  </div>
+                  <div className="text-center mt-2"><p className="text-[10px] text-slate-400 uppercase tracking-widest">Profil Pelatihan</p></div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-
-    </div>
-  </div>
-</section>
+      </section>
       
+      {/* 2. STATISTIK SECTION */}
       <section className="bg-slate-900/50 border-y border-white/5 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto px-4 py-8">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -1009,6 +1238,7 @@ function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryDa
         </div>
       </section>
 
+      {/* 3. JADWAL SECTION */}
       <section id="jadwal" className="py-16 bg-gradient-to-b from-slate-900 to-slate-950">
         <div className="max-w-6xl mx-auto px-4">
           <div className="bg-slate-800/50 p-4 rounded-xl border border-white/5 mb-6 backdrop-blur-sm">
@@ -1023,69 +1253,63 @@ function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryDa
                 <table className="min-w-full text-sm text-left">
                 <thead className="bg-slate-800 text-slate-300 uppercase text-xs font-bold tracking-wider"><tr><th className="px-6 py-4">Program Pelatihan</th><th className="px-6 py-4">Kejuruan</th><th className="px-6 py-4">Periode</th><th className="px-6 py-4 text-center">Kuota</th><th className="px-6 py-4 text-center">Status</th></tr></thead>
                 <tbody className="divide-y divide-slate-700">
-  {isLoading ? (
-    <tr><td colSpan="5" className="px-6 py-12 text-center text-slate-400 animate-pulse">Mengambil data...</td></tr>
-  ) : filteredSchedule.length > 0 ? (
-    filteredSchedule.map((item, index) => {
-      const status = getScheduleStatus(item.startdate, item.enddate);
-      
-      // --- LOGIKA BARU TAMBAHAN ---
-      // Cek apakah kedua tanggal (mulai & selesai) mengandung kata "segera"
-      const isFullSegeraHadir =
-          (item.startdate && item.startdate.toLowerCase().includes("segera")) &&
-          (item.enddate && item.enddate.toLowerCase().includes("segera"));
-      // ---------------------------
-
-      return (
-        <tr key={index} className="hover:bg-slate-800/50 transition-colors">
-          <td className="px-6 py-4 font-medium text-white">{item.program}</td>
-          <td className="px-6 py-4 text-slate-300">{item.kejuruan}</td>
-          
-          {/* --- UPDATE KOLOM PERIODE DI SINI --- */}
-          <td className="px-6 py-4 text-slate-300 font-mono text-xs whitespace-nowrap">
-            {isFullSegeraHadir ? (
-              // JIKA KEDUANYA "SEGERA HADIR", TAMPILKAN SEKALI SAJA (Saya beri warna kuning biar menonjol)
-              <span className="text-yellow-400 font-bold tracking-wide">SEGERA HADIR</span>
-            ) : (
-              // JIKA TIDAK, TAMPILKAN FORMAT NORMAL PAKAI "s.d"
-              <>
-                {formatDate(item.startdate)} <br/> s.d <br/> {formatDate(item.enddate)}
-              </>
-            )}
-          </td>
-          {/* ------------------------------------ */}
-
-          <td className="px-6 py-4 text-center text-slate-300">{item.kuota}</td>
-          <td className="px-6 py-4 text-center">
-            <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(status)}`}>
-              {status}
-            </span>
-          </td>
-        </tr>
-      );
-    })
-  ) : (
-    <tr><td colSpan="5" className="px-6 py-12 text-center text-slate-400 bg-slate-800/20">Tidak ditemukan jadwal.</td></tr>
-  )}
-</tbody>
+                  {isLoading ? (
+                    <tr><td colSpan="5" className="px-6 py-12 text-center text-slate-400 animate-pulse">Mengambil data...</td></tr>
+                  ) : filteredSchedule.length > 0 ? (
+                    filteredSchedule.map((item, index) => {
+                      const status = getScheduleStatus(item.startdate, item.enddate);
+                      // Logika Segera Hadir
+                      const isFullSegeraHadir = (item.startdate && item.startdate.toLowerCase().includes("segera")) && (item.enddate && item.enddate.toLowerCase().includes("segera"));
+                      return (
+                        <tr key={index} className="hover:bg-slate-800/50 transition-colors">
+                          <td className="px-6 py-4 font-medium text-white">{item.program}</td>
+                          <td className="px-6 py-4 text-slate-300">{item.kejuruan}</td>
+                          <td className="px-6 py-4 text-slate-300 font-mono text-xs whitespace-nowrap">
+                            {isFullSegeraHadir ? <span className="text-yellow-400 font-bold tracking-wide">SEGERA HADIR</span> : <>{formatDate(item.startdate)} <br/> s.d <br/> {formatDate(item.enddate)}</>}
+                          </td>
+                          <td className="px-6 py-4 text-center text-slate-300">{item.kuota}</td>
+                          <td className="px-6 py-4 text-center"><span className={`inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(status)}`}>{status}</span></td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr><td colSpan="5" className="px-6 py-12 text-center text-slate-400 bg-slate-800/20">Tidak ditemukan jadwal.</td></tr>
+                  )}
+                </tbody>
                 </table>
             </div>
           </div>
         </div>
       </section>
 
+      {/* 4. GALERI SECTION (UPDATE: GABUNGAN FOTO & VIDEO) */}
       <section id="galeri" className="py-16 bg-slate-950 relative">
         <div className="max-w-6xl mx-auto px-4">
-          <div className="flex items-center justify-between mb-8"><h2 className="text-2xl md:text-3xl font-bold text-white">Dokumentasi Kegiatan</h2><div className="flex bg-slate-900 rounded-full p-1 border border-slate-700">{['foto', 'video'].map(type => (<button key={type} onClick={() => setGalleryType(type)} className={`px-4 py-1.5 rounded-full text-xs uppercase font-bold transition-all ${galleryType === type ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-400 hover:text-white'}`}>{type}</button>))}</div></div>
+          <div className="flex items-center justify-between mb-8">
+              <h2 className="text-2xl md:text-3xl font-bold text-white">Dokumentasi Kegiatan</h2>
+              {/* Tombol Filter SUDAH DIHAPUS */}
+          </div>
+          
           <div className="grid md:grid-cols-3 gap-6">
-            {isLoading ? <div className="col-span-full flex justify-center py-12"><div className="text-emerald-500 animate-pulse">Memuat galeri...</div></div> : filteredGallery.length > 0 ? filteredGallery.map((item, idx) => (
+            {isLoading ? <div className="col-span-full flex justify-center py-12"><div className="text-emerald-500 animate-pulse">Memuat galeri...</div></div> : displayGallery.length > 0 ? displayGallery.map((item, idx) => (
                 <div key={idx} className="group bg-slate-900 rounded-xl overflow-hidden border border-slate-800 hover:border-emerald-500/50 transition-all shadow-lg hover:shadow-emerald-500/10">
                   <div className="aspect-video bg-slate-800 relative overflow-hidden">
-                    {item.type === 'foto' ? <img src={convertToEmbedLink(item.src)} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onError={(e) => e.target.src = 'https://placehold.co/600x400/1e293b/FFFFFF?text=Gambar+Tidak+Tersedia'} /> : <iframe src={convertToEmbedLink(item.src)} title={item.title} className="w-full h-full border-0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen ></iframe>}
+                    {/* Logika Otomatis: Cek Tipe */}
+                    {item.type && item.type.includes('video') ? 
+                        <iframe src={convertToEmbedLink(item.src)} title={item.title} className="w-full h-full border-0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen ></iframe> 
+                        : 
+                        <img src={convertToEmbedLink(item.src)} alt={item.title} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" onError={(e) => e.target.src = 'https://placehold.co/600x400/1e293b/FFFFFF?text=Gambar+Tidak+Tersedia'} />
+                    }
                   </div>
-                  <div className="p-4"><h4 className="text-sm font-semibold text-slate-200 line-clamp-2 group-hover:text-emerald-400 transition-colors">{item.title}</h4></div>
+                  <div className="p-4">
+                      <h4 className="text-sm font-semibold text-slate-200 line-clamp-2 group-hover:text-emerald-400 transition-colors">{item.title}</h4>
+                      {/* Label Tipe Kecil */}
+                      <span className={`text-[10px] uppercase font-bold mt-2 inline-block px-2 py-0.5 rounded ${item.type && item.type.includes('video') ? 'bg-red-900/50 text-red-300' : 'bg-blue-900/50 text-blue-300'}`}>
+                          {item.type && item.type.includes('video') ? 'Video' : 'Foto'}
+                      </span>
+                  </div>
                 </div>
-              )) : <div className="col-span-full py-12 text-center border border-dashed border-slate-800 rounded-xl"><p className="text-slate-400">Belum ada dokumentasi {galleryType}.</p></div>}
+              )) : <div className="col-span-full py-12 text-center border border-dashed border-slate-800 rounded-xl"><p className="text-slate-400">Belum ada dokumentasi.</p></div>}
           </div>
         </div>
       </section>
@@ -1540,51 +1764,172 @@ function LakonDasamukaPage({ dbInstance, kejuruanOptions, lokerData, produkData 
         </div>
         <div className="min-h-[400px] animate-fade-in">
           {tab === 'loker' && (
-            <div>
-              <div className="bg-gradient-to-r from-emerald-900/40 to-slate-900 border border-emerald-500/20 rounded-xl p-4 mb-6 flex flex-col md:flex-row justify-between items-center gap-4"><div className="text-center md:text-left"><h4 className="text-emerald-400 font-bold text-sm mb-1">Anda Perusahaan?</h4><p className="text-slate-400 text-xs">Pasang info lowongan kerja untuk alumni BLK secara gratis.</p></div><a href={FORM_LOKER_URL} target="_blank" rel="noreferrer" className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-full shadow-lg transition-all flex items-center gap-2">Pasang Lowongan</a></div>
-              
-              {lokerData && lokerData.length > 0 ? (
-                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {lokerData.map((item) => (
-                        <div key={item.id} className="bg-slate-900 rounded-xl border border-slate-800 hover:border-emerald-500/30 transition-all group flex flex-col h-full">
-                            <div className="h-40 bg-slate-800 overflow-hidden rounded-t-xl relative">
-                                <img src={convertToEmbedLink(item.image)} alt={item.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" onError={(e) => e.target.src = 'https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop'} />
-                                <span className="absolute top-2 right-2 px-2 py-1 bg-emerald-500 text-white text-[10px] font-bold rounded shadow">{item.status}</span>
-                            </div>
-                            <div className="p-5 flex-1 flex flex-col">
-                                <h4 className="font-bold text-lg text-white mb-1 line-clamp-2">{item.title}</h4>
-                                <p className="text-sm text-emerald-400 font-medium mb-3">{item.company}</p>
-                                <div className="flex items-center gap-2 text-xs text-slate-400 mb-4"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>{item.location}</div>
-                                <div className="mt-auto pt-4 border-t border-slate-800 flex gap-2">
-                                    <button onClick={() => setSelectedLoker(item)} className="w-full px-4 py-2 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors text-center">Detail & Deskripsi</button>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                  </div>
-              ) : (
-                  <div className="text-center py-12 text-slate-500">Belum ada data lowongan kerja yang masuk.</div>
-              )}
-            </div>
+  <div className="space-y-6">
+    {/* Banner ajakan pasang lowongan */}
+    <div className="bg-gradient-to-r from-emerald-900/40 to-slate-900 border border-emerald-500/20 rounded-xl p-4 md:p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <h3 className="font-semibold text-emerald-300 text-sm md:text-base">
+          Anda Perusahaan?
+        </h3>
+        <p className="text-xs md:text-sm text-slate-300">
+          Pasang info lowongan kerja untuk alumni BLK secara gratis. Data akan dicek admin sebelum ditayangkan di portal.
+        </p>
+      </div>
+      <a
+        href={FORM_LOKER_URL}
+        target="_blank"
+        rel="noreferrer"
+        className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-sm font-semibold rounded-lg shadow-md inline-flex items-center gap-2 transition-all"
+      >
+        Pasang Lowongan
+      </a>
+    </div>
+
+    {/* Daftar lowongan */}
+    {lokerData && lokerData.length > 0 ? (
+  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+    {lokerData.map((job) => {
+  // --- BAGIAN 1: DEBUGGING (Cek Console Chrome nanti) ---
+  console.log("=== CEK DATA LOKER ===");
+  console.log("Judul:", job.title);
+  console.log("Link Asli:", job.image); 
+
+  // --- BAGIAN 2: LOGIKA GAMBAR ---
+  const fallbackImage = "https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop";
+  
+  // Kita cek: Kalau job.image ada, kita convert. Kalau tidak ada, pakai fallback.
+  const imageSrc = job.image ? convertToEmbedLink(job.image) : fallbackImage;
+  
+  console.log("Link Final:", imageSrc);
+
+  // --- BAGIAN 3: TAMPILAN (RETURN) ---
+  return (
+    <div
+      key={job.id}
+      className="bg-slate-900 rounded-xl border border-slate-800 hover:border-emerald-500/70 hover:shadow-lg hover:shadow-emerald-500/10 transition-all group cursor-pointer flex flex-col"
+      onClick={() => setSelectedLoker(job)}
+    >
+      {/* Gambar poster lowongan */}
+      <div className="h-40 bg-slate-800 overflow-hidden rounded-t-xl relative">
+        <img
+          src={imageSrc}
+          alt={job.title}
+          
+          // PENTING: Supaya Google tidak memblokir gambar
+          referrerPolicy="no-referrer"
+          
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+          onError={(e) => {
+            // Mencegah error berulang (looping)
+            if (e.currentTarget.src !== fallbackImage) {
+               e.currentTarget.src = fallbackImage;
+            }
+          }}
+        />
+
+        {job.status && (
+          <span className="absolute top-3 left-3 bg-emerald-500 text-xs font-semibold px-2 py-1 rounded-full text-white shadow-md">
+            {job.status}
+          </span>
+        )}
+      </div>
+
+      {/* Isi kartu lowongan */}
+      <div className="p-4 flex-1 flex flex-col">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <h3 className="text-lg font-semibold text-white truncate">
+            {job.title}
+          </h3>
+        </div>
+
+        <p className="text-emerald-400 text-sm font-medium mb-2 line-clamp-1">
+          {job.company}
+        </p>
+
+        <div className="flex flex-wrap gap-2 text-xs text-slate-300 mb-3">
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-800/80 border border-slate-700/60">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            {job.location}
+          </span>
+          {job.education && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-800/80 border border-slate-700/60">
+              {job.education}
+            </span>
           )}
+        </div>
+
+        <p className="text-slate-300 text-sm line-clamp-3 mb-4">
+          {job.desc}
+        </p>
+
+        <div className="mt-auto flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800/80">
+          <span>
+            Batas: <span className="text-emerald-400">{job.deadline}</span>
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Info Alumni
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+})}
+  </div>
+) : (
+  <div className="text-center py-10 text-slate-500 text-sm border border-dashed border-slate-700 rounded-xl">
+    Belum ada lowongan yang tersedia.
+  </div>
+)}
+
+  </div>
+)}
+
           {tab === 'produk' && (
             <div>
               <div className="bg-gradient-to-r from-blue-900/40 to-slate-900 border border-blue-500/20 rounded-xl p-4 mb-6 flex flex-col md:flex-row justify-between items-center gap-4"><div className="text-center md:text-left"><h4 className="text-blue-400 font-bold text-sm mb-1">Anda Alumni BLK?</h4><p className="text-slate-400 text-xs">Promosikan produk wirausaha Anda di sini secara gratis.</p></div><a href={FORM_PRODUK_URL} target="_blank" rel="noreferrer" className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-full shadow-lg transition-all flex items-center gap-2">Promosikan Produk</a></div>
               {produkData && produkData.length > 0 ? (
                   <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    {produkData.map((item) => (
-                        <div key={item.id} className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden group hover:shadow-xl transition-all flex flex-col h-full cursor-pointer" onClick={() => setSelectedProduk(item)}>
-                            <div className="w-full h-48 bg-slate-800 relative overflow-hidden">
-                                <img src={convertToEmbedLink(item.image)} alt={item.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" onError={(e) => e.target.src = 'https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop'} />
-                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3"><div className="text-white font-bold text-xl">{item.price}</div></div>
-                            </div>
-                            <div className="p-4 flex-1 flex flex-col">
-                                <h4 className="font-bold text-white mb-1 line-clamp-2">{item.name}</h4>
-                                <p className="text-xs text-emerald-400 mb-3 flex-1">{item.alumni}</p>
-                                <button className="w-full py-2 mt-auto text-xs font-bold rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors flex items-center justify-center gap-2 border border-slate-700">Lihat Detail</button>
-                            </div>
-                        </div>
-                    ))}
+                    {produkData.map((item) => {
+    // 1. Definisikan Fallback Image khusus Produk
+    const fallbackProduct = "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop";
+    
+    // 2. Proses Link Gambar (Gunakan fungsi convert yang sudah diperbarui)
+    const productSrc = item.image ? convertToEmbedLink(item.image) : fallbackProduct;
+
+    return (
+        <div 
+            key={item.id} 
+            className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden group hover:shadow-xl transition-all flex flex-col h-full cursor-pointer" 
+            onClick={() => setSelectedProduk(item)}
+        >
+            <div className="w-full h-48 bg-slate-800 relative overflow-hidden">
+                <img 
+                    src={productSrc} 
+                    alt={item.name} 
+                    
+                    // WAJIB: Supaya Google tidak memblokir
+                    referrerPolicy="no-referrer"
+                    
+                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
+                    onError={(e) => {
+                        if (e.currentTarget.src !== fallbackProduct) {
+                            e.currentTarget.src = fallbackProduct;
+                        }
+                    }} 
+                />
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+                    <div className="text-white font-bold text-xl">{item.price}</div>
+                </div>
+            </div>
+            <div className="p-4 flex-1 flex flex-col">
+                <h4 className="font-bold text-white mb-1 line-clamp-2">{item.name}</h4>
+                <p className="text-xs text-emerald-400 mb-3 flex-1">{item.alumni}</p>
+                <button className="w-full py-2 mt-auto text-xs font-bold rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors flex items-center justify-center gap-2 border border-slate-700">Lihat Detail</button>
+            </div>
+        </div>
+    );
+})}
                   </div>
               ) : (
                   <div className="text-center py-12 text-slate-500">Belum ada produk alumni yang ditampilkan.</div>
@@ -1606,7 +1951,14 @@ function LakonDasamukaPage({ dbInstance, kejuruanOptions, lokerData, produkData 
                <button onClick={() => setSelectedLoker(null)} className="absolute top-4 right-4 z-10 p-2 bg-black/50 rounded-full text-white hover:bg-red-600 transition-colors">X</button>
                <div className="overflow-y-auto p-6">
                 <div className="relative h-40 bg-slate-800 overflow-hidden rounded-lg mb-4">
-                    <img src={convertToEmbedLink(selectedLoker.image)} alt={selectedLoker.title} className="w-full h-full object-cover" onError={(e) => e.target.src = 'https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop'} />
+                    <img
+        // TAMBAHKAN convertToEmbedLink DI SINI JUGA
+        src={convertToEmbedLink(selectedLoker.image) || "https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop"}
+        referrerPolicy="no-referrer"
+        alt={selectedLoker.title}
+        className="w-full h-full object-cover"
+        // ... onError handler ...
+    />
                     <span className="absolute top-2 right-2 px-2 py-1 bg-emerald-500 text-white text-[10px] font-bold rounded shadow">{selectedLoker.status}</span>
                 </div>
                 <h3 className="text-white text-2xl font-bold mb-1">{selectedLoker.title}</h3>
@@ -1645,7 +1997,16 @@ function LakonDasamukaPage({ dbInstance, kejuruanOptions, lokerData, produkData 
                  <button onClick={() => setSelectedProduk(null)} className="absolute top-4 right-4 z-10 p-2 bg-black/50 rounded-full text-white hover:bg-red-600 transition-colors">X</button>
                  <div className="overflow-y-auto p-6">
                      <div className="relative h-64 bg-slate-800 overflow-hidden rounded-lg mb-4">
-                         <img src={convertToEmbedLink(selectedProduk.image)} alt={selectedProduk.name} className="w-full h-full object-cover" onError={(e) => e.target.src = 'https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop'} />
+                         <img 
+                       src={convertToEmbedLink(selectedProduk.image) || "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop"} 
+                       alt={selectedProduk.name} 
+                       
+                       // WAJIB: Tambahkan ini
+                       referrerPolicy="no-referrer"
+                       
+                       className="w-full h-full object-cover" 
+                       onError={(e) => e.target.src = 'https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop'} 
+                   />
                          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3"><div className="text-white font-bold text-xl">{selectedProduk.price}</div></div>
                      </div>
                      <h3 className="text-white text-2xl font-bold mb-1">{selectedProduk.name}</h3>
@@ -1842,6 +2203,180 @@ function ChatWidget({ isOpen, setIsOpen, config }) {
   );
 }
 
+// --- KOMPONEN PANDUAN & AKSES PENDAFTARAN (VERSI UPDATE) ---
+function PanduanPage({ onBack }) {
+  // GANTI STATUS INI JIKA PENDAFTARAN DIBUKA (true/false)
+  const isRegistrationOpen = false; 
+  
+  // State untuk popup panduan
+  const [showGuideModal, setShowGuideModal] = useState(false);
+
+  // Data Menu Pintas (Sudah disesuaikan)
+  const links = [
+    { 
+      id: "guide",
+      title: "Panduan Pelatihan Skillhub (APBN)", 
+      icon: "📋", 
+      desc: "Cara buat akun & daftar pelatihan", 
+      color: "blue",
+      isModal: true // Penanda khusus agar membuka modal
+    },
+    { 
+      title: "Instagram BLK", 
+      icon: "📸", 
+      desc: "Info update jadwal terbaru", 
+      url: "https://instagram.com/blkkotamagelang", 
+      color: "pink" 
+    },
+    { 
+      title: "Lokasi / Peta", 
+      icon: "📍", 
+      desc: "Cek lokasi via Google Maps", 
+      url: "https://maps.app.goo.gl/rF91y7o5sP9p5s67A", // Link Maps BLK Magelang
+      color: "red" 
+    }, 
+    { 
+      title: "Admin WhatsApp", 
+      icon: "💬", 
+      desc: "Tanya jawab langsung", 
+      url: "https://wa.me/6285741720129", 
+      color: "emerald" 
+    },
+  ];
+
+  return (
+    <section className="pt-28 pb-20 min-h-screen bg-slate-950">
+      <div className="max-w-4xl mx-auto px-4">
+        {/* Header */}
+        <div className="text-center mb-10 animate-fade-in-up">
+          <h1 className="text-3xl md:text-4xl font-extrabold text-white mb-4">Pusat Informasi Pendaftaran</h1>
+          <p className="text-slate-400 max-w-2xl mx-auto">
+            Gerbang utama menuju pelatihan kompetensi. Silakan pelajari panduan sebelum mendaftar.
+          </p>
+        </div>
+
+        {/* STATUS BANNER */}
+        <div className={`p-6 rounded-2xl border ${isRegistrationOpen ? 'bg-emerald-900/30 border-emerald-500/50' : 'bg-yellow-900/30 border-yellow-500/50'} text-center mb-12 shadow-lg animate-fade-in`}>
+            <h2 className={`text-xl font-bold mb-2 ${isRegistrationOpen ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                STATUS PENDAFTARAN: {isRegistrationOpen ? "SEDANG DIBUKA" : "BELUM DIBUKA / TUTUP"}
+            </h2>
+            <p className="text-slate-300 text-sm mb-6">
+                {isRegistrationOpen 
+                    ? "Silakan klik tombol di bawah untuk mengisi formulir pendaftaran." 
+                    : "Mohon maaf, pendaftaran pelatihan saat ini sedang ditutup. Pantau terus Instagram kami untuk update jadwal terbaru."}
+            </p>
+            
+            {/* TOMBOL DAFTAR UTAMA (Non-aktif jika tutup) */}
+            {isRegistrationOpen ? (
+                <a href="#" className="inline-block px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-full shadow-lg shadow-emerald-500/30 transition-transform transform hover:-translate-y-1">
+                    👉 ISI FORMULIR PENDAFTARAN
+                </a>
+            ) : (
+                <button disabled className="px-8 py-4 bg-slate-700 text-slate-400 font-bold rounded-full cursor-not-allowed border border-slate-600">
+                    Formulir Belum Dapat Diakses
+                </button>
+            )}
+        </div>
+
+        {/* GRID MENU INFORMASI */}
+        <h3 className="text-white font-bold text-lg mb-6 border-l-4 border-blue-500 pl-3">Menu Informasi</h3>
+        <div className="grid md:grid-cols-2 gap-4">
+            {links.map((link, idx) => (
+                link.isModal ? (
+                    // CARD UNTUK PANDUAN (MEMBUKA MODAL)
+                    <button 
+                        key={idx}
+                        onClick={() => setShowGuideModal(true)}
+                        className="flex items-center gap-4 p-4 bg-slate-900 border border-slate-800 rounded-xl hover:border-emerald-500/50 hover:bg-slate-800 transition-all group text-left w-full"
+                    >
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl bg-${link.color}-500/10 text-${link.color}-400 group-hover:scale-110 transition-transform`}>
+                            {link.icon}
+                        </div>
+                        <div>
+                            <h4 className="text-white font-bold text-sm group-hover:text-emerald-400 transition-colors">{link.title}</h4>
+                            <p className="text-xs text-slate-400">{link.desc}</p>
+                        </div>
+                        <div className="ml-auto text-slate-600 group-hover:text-white transition-colors">↓</div>
+                    </button>
+                ) : (
+                    // CARD MENU BIASA (LINK EXTERNAL)
+                    <a 
+                        key={idx} 
+                        href={link.url} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="flex items-center gap-4 p-4 bg-slate-900 border border-slate-800 rounded-xl hover:border-emerald-500/50 hover:bg-slate-800 transition-all group"
+                    >
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl bg-${link.color}-500/10 text-${link.color}-400 group-hover:scale-110 transition-transform`}>
+                            {link.icon}
+                        </div>
+                        <div>
+                            <h4 className="text-white font-bold text-sm group-hover:text-emerald-400 transition-colors">{link.title}</h4>
+                            <p className="text-xs text-slate-400">{link.desc}</p>
+                        </div>
+                        <div className="ml-auto text-slate-600 group-hover:text-white transition-colors">→</div>
+                    </a>
+                )
+            ))}
+        </div>
+
+        {/* TOMBOL KEMBALI */}
+        <div className="mt-12 text-center">
+            <button onClick={onBack} className="text-slate-400 hover:text-white text-sm underline">Kembali ke Beranda</button>
+        </div>
+
+        {/* --- MODAL POPUP PANDUAN --- */}
+        {showGuideModal && (
+            <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4 animate-fade-in">
+                <div className="bg-slate-900 border border-blue-500/50 rounded-2xl w-full max-w-md shadow-2xl p-6 relative">
+                    <button onClick={() => setShowGuideModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">✕</button>
+                    
+                    <div className="text-center mb-6">
+                        <div className="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-full flex items-center justify-center text-2xl mx-auto mb-3">📚</div>
+                        <h3 className="text-xl font-bold text-white">Panduan Skillhub</h3>
+                        <p className="text-xs text-slate-400 mt-1">Silakan pilih panduan yang ingin Anda baca.</p>
+                    </div>
+
+                    <div className="space-y-3">
+                        <a 
+                            href="https://drive.google.com/file/d/14MHZdNWKvHCc1SJruMQPwAN27GG7g4cJ/view" 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="flex items-center gap-3 p-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-blue-500 rounded-xl transition-all group"
+                        >
+                            <span className="text-2xl">📝</span>
+                            <div className="text-left">
+                                <div className="text-sm font-bold text-white group-hover:text-blue-400">Panduan Pendaftaran Pelatihan</div>
+                                <div className="text-[10px] text-slate-400">Langkah mendaftar pelatihan di Skillhub</div>
+                            </div>
+                        </a>
+
+                        <a 
+                            href="https://drive.google.com/file/d/1fA84i4JWZPUJcnOjH_AP51kmzSlcAolv/view" 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="flex items-center gap-3 p-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-blue-500 rounded-xl transition-all group"
+                        >
+                            <span className="text-2xl">👤</span>
+                            <div className="text-left">
+                                <div className="text-sm font-bold text-white group-hover:text-blue-400">Panduan Membuat Akun</div>
+                                <div className="text-[10px] text-slate-400">Cara registrasi akun SIAPkerja / Skillhub</div>
+                            </div>
+                        </a>
+                    </div>
+
+                    <button onClick={() => setShowGuideModal(false)} className="mt-6 w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold rounded-lg transition-colors">
+                        Tutup
+                    </button>
+                </div>
+            </div>
+        )}
+
+      </div>
+    </section>
+  );
+}
+
 // --- FOOTER, LOGIN, DLL ---
 function Footer() {
   const [newComment, setNewComment] = useState("");
@@ -1861,30 +2396,33 @@ function Footer() {
   }, []);
 
   // Fetch Approved Comments Only
-  useEffect(() => {
-    if (!db) {
-        // If DB not configured, we still set up user for display but skip fetching comments
-        // If auth is present, the main App component handles the initial user state.
-        return; 
-    }
-    
-    // FIX: Gunakan helper getCommentsCollection
-    const q = query(getCommentsCollection(db), where("status", "==", "approved"), orderBy("createdAt", "desc"));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const comments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        // Manual sort (already done by query but adding fallback just in case)
-        comments.sort((a, b) => {
-            const timeA = a.createdAt ? a.createdAt.seconds : 0;
-            const timeB = b.createdAt ? b.createdAt.seconds : 0;
-            return timeB - timeA;
-        });
-        setApprovedComments(comments);
-    }, (err) => {
-        console.error("Error fetch public comments:", err);
+useEffect(() => {
+  if (!db) {
+    return; 
+  }
+
+  // CUKUP WHERE SAJA
+  const q = query(
+    getCommentsCollection(db),
+    where("status", "==", "approved")
+  );
+
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    const comments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    // Manual sort tetap boleh
+    comments.sort((a, b) => {
+      const timeA = a.createdAt ? a.createdAt.seconds : 0;
+      const timeB = b.createdAt ? b.createdAt.seconds : 0;
+      return timeB - timeA;
     });
-    return () => unsubscribe();
-  }, [db]);
+    setApprovedComments(comments);
+  }, (err) => {
+    console.error("Error fetch public comments:", err);
+  });
+
+  return () => unsubscribe();
+}, [db]);
+
 
   const showCustomModal = (title, body, type = 'info') => {
     setModalMessage({ title, body, type });
@@ -2231,18 +2769,18 @@ function App() {
             }
         };
 
-        const urls = [JADWAL_CSV_URL, GALERI_CSV_URL, STATS_CSV_URL, PESERTA_CSV_URL, LOKER_CSV_URL, PRODUK_CSV_URL];
+        const urls = [JADWAL_CSV_URL, STATS_CSV_URL, PESERTA_CSV_URL];
         const responses = await Promise.all(urls.map(url => fetchWithRetry(url).catch(e => { console.warn(`Error fetching ${url}:`, e.message); return ""; })));
-        const [jadwal, galeri, stats, peserta, loker, produk] = responses.map(parseCSV);
+        const [jadwal, stats, peserta] = responses.map(parseCSV);
 
         jadwal.sort((a, b) => new Date(a.startdate) - new Date(b.startdate));
         
         setAllScheduleData(jadwal);
-        setGalleryData(galeri.map(normalizeGalleryData).filter(item => item !== null));
+        // setGalleryData(galeri.map(normalizeGalleryData).filter(item => item !== null));
         setAllStatsData(stats);
         setPesertaData(peserta);
-        setLokerData(loker.map((i, idx) => normalizeLokerData(i, idx)).filter(item => item !== null));
-        setProdukData(produk.map((i, idx) => normalizeProdukData(i, idx)).filter(item => item !== null));
+        // setLokerData(loker.map((i, idx) => normalizeLokerData(i, idx)).filter(item => item !== null));
+        // setProdukData(produk.map((i, idx) => normalizeProdukData(i, idx)).filter(item => item !== null));
         
         const kejuruan = [...new Set([...jadwal.map(i => i.kejuruan), ...peserta.map(i => i.kejuruan)])].filter(Boolean);
         setKejuruanOptions(["Semua", ...kejuruan]);
@@ -2259,6 +2797,81 @@ function App() {
     };
     fetchData();
   }, []); 
+
+      // Dengarkan Loker yang sudah APPROVED dari Firestore
+  useEffect(() => {
+    if (!db) return; // kalau Firebase belum ready, skip
+
+    const q = query(
+      getJobsCollection(db),
+      where("moderationStatus", "==", "approved")
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const items = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        // Sort terbaru di atas (pakai createdAt kalau ada)
+        items.sort((a, b) => {
+          const tA = a.createdAt?.seconds ?? 0;
+          const tB = b.createdAt?.seconds ?? 0;
+          return tB - tA;
+        });
+        setLokerData(items);
+      },
+      (err) => {
+        console.error("Error fetch jobs (approved):", err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  // Dengarkan Produk Alumni yang sudah APPROVED dari Firestore
+  useEffect(() => {
+    if (!db) return;
+
+    const q = query(
+      getProductsCollection(db),
+      where("moderationStatus", "==", "approved")
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const items = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        items.sort((a, b) => {
+          const tA = a.createdAt?.seconds ?? 0;
+          const tB = b.createdAt?.seconds ?? 0;
+          return tB - tA;
+        });
+        setProdukData(items);
+      },
+      (err) => {
+        console.error("Error fetch products (approved):", err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+// --- TAMBAHKAN LISTENER REALTIME KHUSUS GALERI DI SINI (Di dalam App) ---
+useEffect(() => {
+    if (!db) return;
+    const q = query(getGalleryCollection(db), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setGalleryData(items); // Masukkan ke state galleryData yang sudah ada
+    }, (err) => console.log("Gallery fetch error:", err));
+    
+    return () => unsubscribe();
+    }, []);
 
   const handleLogout = async () => {
     if (auth) {
@@ -2279,9 +2892,10 @@ function App() {
   };
 
   const renderPage = () => {
-    if (currentPage === "beranda") return <BerandaPage allStatsData={allStatsData} staticStatsData={[]} allScheduleData={allScheduleData} galleryData={galleryData} kejuruanOptions={kejuruanOptions} isLoading={isLoading} error={error} />;
+    if (currentPage === "beranda") return <BerandaPage allStatsData={allStatsData} staticStatsData={[]} allScheduleData={allScheduleData} galleryData={galleryData} kejuruanOptions={kejuruanOptions} isLoading={isLoading} error={error} setCurrentPage={setCurrentPage}/>;
     if (currentPage === "dasamuka") return <LakonDasamukaPage dbInstance={db} kejuruanOptions={kejuruanOptions} lokerData={lokerData} produkData={produkData} />;
-    
+    if (currentPage === "panduan") return <PanduanPage onBack={() => setCurrentPage("beranda")} />;
+
     // UPDATE: Hapus force_guest_mode saat login berhasil
     if (currentPage === "login") return <LoginPage onLogin={(u) => {
         localStorage.removeItem('force_guest_mode'); 
