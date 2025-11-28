@@ -2034,23 +2034,22 @@ function LakonDasamukaPage({ dbInstance, kejuruanOptions, lokerData, produkData 
   );
 }
 
-// --- CHAT WIDGET ---
+// --- CHAT WIDGET (FIX: TOMBOL CLOSE & TAMPILAN 3D TRANSPARAN) ---
 function ChatWidget({ isOpen, setIsOpen, config }) {
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const defaultConfig = {
-    title: "Asisten SELARAS",
-    subTitle: "Online (n8n Powered)",
+    title: "Si Laras", 
+    subTitle: "Asisten Virtual BLK",
     webhookUrl: CHAT_WEBHOOK_SELARAS,
-    initialMessage: "Halo! Ada yang bisa saya bantu terkait pelatihan atau layanan di BLK?"
+    initialMessage: "Halo Sobat BLK! Saya Si Laras. Ada yang bisa saya bantu terkait pelatihan hari ini?"
   };
   const currentConfig = config || defaultConfig;
 
-  // 1. Definisikan key unik berdasarkan title chat (untuk Local Storage)
+  // KEY STORAGE
   const CHAT_STORAGE_KEY = `chatHistory_SELARAS_${currentConfig.title.replace(/\s/g, '')}`;
   const SESSION_KEY = `chatSessionId_SELARAS_${currentConfig.title.replace(/\s/g, '')}`;
   
-  // 2. Session ID (Diambil dari Local Storage atau buat baru)
   const [sessionId] = useState(() => {
     let id = localStorage.getItem(SESSION_KEY);
     if (!id) {
@@ -2060,7 +2059,6 @@ function ChatWidget({ isOpen, setIsOpen, config }) {
     return id;
   });
 
-  // 3. Messages (Diambil dari Local Storage atau default)
   const [messages, setMessages] = useState(() => {
     try {
         const storedMessages = localStorage.getItem(CHAT_STORAGE_KEY);
@@ -2068,49 +2066,22 @@ function ChatWidget({ isOpen, setIsOpen, config }) {
             const parsed = JSON.parse(storedMessages);
             if (Array.isArray(parsed) && parsed.length > 0) return parsed;
         }
-    } catch (e) {
-        console.error("Failed to load chat history:", e);
-    }
-    // Pesan Awal
+    } catch (e) { console.error(e); }
     return [{ text: currentConfig.initialMessage, isUser: false }];
   });
 
-  // 4. Persistence Effect: Simpan pesan ke Local Storage setiap kali berubah
   useEffect(() => {
-    try {
-        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages));
-    } catch (e) {
-        console.error("Failed to save chat history:", e);
-    }
+    try { localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(messages)); } catch (e) {}
   }, [messages, CHAT_STORAGE_KEY]);
 
-  // 5. Context Change Effect: Muat ulang pesan saat konfigurasi chat berubah
   useEffect(() => {
-      // Muat pesan yang benar untuk konteks chat saat ini
       try {
           const storedMessages = localStorage.getItem(CHAT_STORAGE_KEY);
-          let newMessages;
-          if (storedMessages) {
-              const parsed = JSON.parse(storedMessages);
-              newMessages = (Array.isArray(parsed) && parsed.length > 0) ? parsed : [{ text: config.initialMessage, isUser: false }];
-          } else {
-              newMessages = [{ text: config.initialMessage, isUser: false }];
-          }
-
-          // Hanya perbarui state jika konten berbeda
-          if (JSON.stringify(messages) !== JSON.stringify(newMessages)) {
-              setMessages(newMessages);
-          }
-      } catch (e) {
-          console.error("Error loading context messages:", e);
-          setMessages([{ text: config.initialMessage, isUser: false }]);
-      }
-
-  }, [config.title, config.initialMessage]); 
-
+          if (!storedMessages) setMessages([{ text: currentConfig.initialMessage, isUser: false }]);
+      } catch (e) {}
+  }, [currentConfig.title]); 
 
   const messagesEndRef = useRef(null);
-  
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); };
   useEffect(() => { if (isOpen) { scrollToBottom(); } }, [messages, isOpen]);
 
@@ -2122,86 +2093,138 @@ function ChatWidget({ isOpen, setIsOpen, config }) {
     setInputValue("");
     setIsTyping(true);
     
-    // Siapkan payload dengan Session ID yang Persisten
     const payload = { chatInput: userMessage, sessionId: sessionId };
     
-    // Retry logic with exponential backoff
-    const maxRetries = 3;
-    let delay = 1000;
-
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            const response = await fetch(currentConfig.webhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (response.ok) {
-                const responseText = await response.text();
-                let botResponse = responseText;
-                try {
-                    const json = JSON.parse(responseText);
-                    const content = json.output || json.text || json.message;
-                    if (typeof content === 'object') {
-                        botResponse = JSON.stringify(content, null, 2);
-                    } else if (content) {
-                        botResponse = String(content);
-                    } else {
-                        botResponse = JSON.stringify(json, null, 2);
-                    }
-                } catch (e) { /* ignore JSON parse error */ }
-                
-                setMessages(prev => [...prev, { text: botResponse, isUser: false }]);
-                setIsTyping(false);
-                return; // Success
-            }
-            
-            // If response is not ok, throw to trigger retry
-            throw new Error(`HTTP error! status: ${response.status}`);
-
-        } catch (error) {
-            if (i === maxRetries - 1) {
-                // Last retry failed
-                setMessages(prev => [...prev, { text: "Maaf, gagal terhubung ke server asisten. Silakan coba lagi nanti.", isUser: false }]);
-                setIsTyping(false);
-                console.error("Chat Webhook failed after max retries:", error);
-                break;
-            }
-            // Wait with exponential backoff
-            await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 2; 
+    try {
+        const response = await fetch(currentConfig.webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+            const json = await response.json();
+            const content = json.output || json.text || json.message || JSON.stringify(json);
+            const cleanContent = typeof content === 'string' ? content.replace(/\*\*/g, '') : JSON.stringify(content);
+            setMessages(prev => [...prev, { text: cleanContent, isUser: false }]);
+        } else {
+            throw new Error("Server error");
         }
+    } catch (error) {
+        setMessages(prev => [...prev, { text: "Maaf, Si Laras sedang mengalami gangguan koneksi. Coba lagi nanti ya.", isUser: false }]);
+    } finally {
+        setIsTyping(false);
     }
   };
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end font-sans">
+    <div className="fixed bottom-6 right-6 z-[9999] flex flex-col items-end font-sans">
+      
+      {/* 1. JENDELA CHAT */}
       {isOpen && (
-        <div className="mb-4 w-80 md:w-96 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-fade-in-up h-[500px]">
-          <div className="bg-emerald-600 p-4 flex justify-between items-center shadow-md">
-            <div className="flex items-center gap-3">
-               <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white"><path fillRule="evenodd" d="M4.848 2.771A49.14 49.14 0 0 1 12 2.25c2.43 0 4.817.17 7.152.521a.75.75 0 0 1 .752.752v8.25a.75.75 0 0 1-.752.752a48.887 48.887 0 0 1-14.304 0 .75.75 0 0 1-.752-.752v-8.25a.75.75 0 0 1 .752-.752Z" clipRule="evenodd" /><path d="M12.75 12.3a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 .75.75Z" /></svg></div>
-               <div><h3 className="font-bold text-white text-sm">{currentConfig.title}</h3><div className="flex items-center gap-1"><span className="w-1.5 h-1.5 bg-green-300 rounded-full animate-pulse"></span><span className="text-[10px] text-emerald-100">{currentConfig.subTitle}</span></div></div>
+        <div className="mb-4 w-80 md:w-96 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-fade-in-up h-[500px] ring-1 ring-white/10">
+          {/* Header Chat */}
+          <div className="bg-gradient-to-r from-emerald-600 to-emerald-800 p-4 flex justify-between items-center shadow-lg relative overflow-hidden shrink-0">
+            {/* Hiasan background */}
+            <div className="absolute -top-10 -right-10 w-24 h-24 bg-white/10 rounded-full blur-xl pointer-events-none"></div>
+            
+            <div className="flex items-center gap-3 relative z-10">
+               <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center overflow-hidden border-2 border-white/30 shadow-inner">
+                  <img 
+                    src="/maskot-selaras.png" 
+                    alt="Si Laras" 
+                    className="w-full h-full object-cover scale-110" // scale agar pas di lingkaran kecil header
+                  />
+               </div>
+               <div>
+                 <h3 className="font-bold text-white text-base leading-tight">{currentConfig.title}</h3>
+                 <div className="flex items-center gap-1.5 mt-0.5">
+                   <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400"></span>
+                    </span>
+                   <span className="text-[10px] text-emerald-100 font-medium tracking-wide opacity-90">{currentConfig.subTitle}</span>
+                 </div>
+               </div>
             </div>
-            <button onClick={() => setIsOpen(false)} className="text-white/70 hover:text-white"><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg></button>
+            {/* FIX: Tombol Close diberi z-20 agar bisa diklik (di atas layer blur) */}
+            <button 
+                onClick={() => setIsOpen(false)} 
+                className="relative z-20 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full p-1 transition-all cursor-pointer"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+            </button>
           </div>
-          <div className="flex-1 bg-slate-900/95 p-4 overflow-y-auto space-y-4 scrollbar-thin scrollbar-thumb-slate-700">
-            {messages.map((msg, idx) => (<div key={idx} className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[80%] p-3 rounded-xl text-sm leading-relaxed shadow-sm ${msg.isUser ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700'}`}>{msg.text}</div></div>))}
-            {isTyping && (<div className="flex justify-start"><div className="bg-slate-800 border border-slate-700 p-3 rounded-xl rounded-tl-none flex gap-1"><div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce"></div><div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce delay-100"></div><div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce delay-200"></div></div></div>)}
+          
+          {/* Body Chat */}
+          <div className="flex-1 bg-slate-900/95 p-4 overflow-y-auto space-y-4 scrollbar-thin scrollbar-thumb-slate-700 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]">
+            {messages.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.isUser ? 'justify-end' : 'justify-start items-end gap-2'}`}>
+                    {!msg.isUser && (
+                        <div className="w-8 h-8 rounded-full bg-emerald-600/20 flex items-center justify-center shrink-0 border border-emerald-400/30 overflow-hidden">
+                             {/* Mini icon maskot di bubble chat */}
+                            <img src="/maskot-selaras.png" className="w-full h-full object-cover" />
+                        </div>
+                    )}
+                    <div className={`max-w-[80%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.isUser ? 'bg-emerald-600 text-white rounded-br-none' : 'bg-slate-800 text-slate-200 rounded-bl-none border border-slate-700'}`}>
+                        {msg.text}
+                    </div>
+                </div>
+            ))}
+            {isTyping && (<div className="flex justify-start items-center gap-2 ml-10"><div className="text-[10px] text-slate-500 italic animate-pulse">Si Laras sedang mengetik...</div></div>)}
             <div ref={messagesEndRef} />
           </div>
-          <form onSubmit={handleSendMessage} className="p-3 bg-slate-800 border-t border-slate-700 flex gap-2"><input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="Ketik pesan Anda..." className="flex-1 bg-slate-900 text-white text-sm rounded-lg px-3 py-2 border border-slate-700 focus:outline-none focus:border-emerald-500"/><button type="submit" disabled={!inputValue.trim() || isTyping} className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white p-2 rounded-lg transition-colors"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5"><path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25h6.115a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" /></svg></button></form>
+          
+          <form onSubmit={handleSendMessage} className="p-3 bg-slate-800 border-t border-slate-700 flex gap-2 shrink-0">
+            <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="Tanya Si Laras..." className="flex-1 bg-slate-900 text-white text-sm rounded-xl px-4 py-3 border border-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all shadow-inner"/>
+            <button type="submit" disabled={!inputValue.trim() || isTyping} className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white p-3 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/30 transform hover:scale-105">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" /></svg>
+            </button>
+          </form>
         </div>
       )}
+      
+      {/* 2. TOMBOL FLOATING (MODIFIKASI: TRANSPARAN & TIMBUL) */}
       {!isOpen && (
-        <button onClick={() => setIsOpen(true)} className="flex items-center gap-2 px-4 py-3 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold shadow-xl hover:shadow-emerald-500/40 transition-all animate-bounce hover:animate-none">
-          <div className="relative"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path fillRule="evenodd" d="M4.848 2.771A49.14 49.14 0 0 1 12 2.25c2.43 0 4.817.17 7.152.521a.75.75 0 0 1 .752.752v8.25a.75.75 0 0 1-.752.752a48.887 48.887 0 0 1-14.304 0 .75.75 0 0 1-.752-.752v-8.25a.75.75 0 0 1 .752-.752Z" clipRule="evenodd" /><path d="M12.75 12.3a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 .75.75Z" /></svg><span className="absolute top-0 right-0 -mt-1 -mr-1 w-2 h-2 bg-red-500 rounded-full animate-ping"></span></div>Chat SELARAS
-        </button>
+        <div className="flex flex-col items-end gap-2 group">
+            {/* Balon Bicara */}
+            <div className="bg-white text-slate-900 px-4 py-2 rounded-xl rounded-br-none shadow-xl shadow-emerald-900/20 animate-bounce origin-bottom-right mb-1 border border-emerald-100 hidden md:block">
+                <p className="text-xs font-bold whitespace-nowrap">Halo! Tanya Si Laras yuk?</p>
+            </div>
+
+            <button 
+                onClick={() => setIsOpen(true)} 
+                className="relative w-16 h-16 md:w-20 md:h-20 bg-emerald-600 hover:bg-emerald-500 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.5)] hover:shadow-[0_0_30px_rgba(16,185,129,0.7)] transition-all transform hover:scale-110 flex items-center justify-center border-4 border-slate-900 ring-2 ring-emerald-500"
+            >
+                {/* FIX BACKGROUND PUTIH:
+                   1. Hapus 'bg-white'
+                   2. Hapus 'overflow-hidden' agar kepala bisa menyembul keluar (efek 3D)
+                   3. Gunakan 'relative' untuk wadah gambar
+                */}
+                <div className="w-14 h-14 md:w-20 md:h-20 relative flex items-end justify-center">
+                    <img 
+                        src="/maskot-selaras.png" 
+                        alt="Si Laras" 
+                        // Scale diperbesar & geser ke atas sedikit agar kepala timbul keluar lingkaran
+                        className="w-full h-full object-contain transform scale-125 -translate-y-1"
+                        onError={(e) => {
+                            e.target.style.display='none'; 
+                            e.target.parentNode.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8 md:w-10 md:h-10 text-white m-auto mb-4"><path d="M4.848 2.771A49.14 49.14 0 0 1 12 2.25c2.43 0 4.817.17 7.152.521a.75.75 0 0 1 .752.752v8.25a.75.75 0 0 1-.752.752a48.887 48.887 0 0 1-14.304 0 .75.75 0 0 1-.752-.752v-8.25a.75.75 0 0 1 .752-.752Z" clip-rule="evenodd" /><path d="M12.75 12.3a.75.75 0 0 1-.75.75h-1.5a.75.75 0 0 1 0-1.5h1.5a.75.75 0 0 1 .75.75Z" /></svg>';
+                        }} 
+                    />
+                </div>
+                
+                {/* Notifikasi Merah */}
+                <span className="absolute top-0 right-0 h-4 w-4 md:h-5 md:w-5 bg-red-500 border-2 border-slate-900 rounded-full flex items-center justify-center z-10">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="text-[8px] md:text-[10px] font-bold text-white relative">1</span>
+                </span>
+            </button>
+        </div>
       )}
     </div>
   );
 }
+    
 
 // --- KOMPONEN PANDUAN & AKSES PENDAFTARAN (VERSI UPDATE) ---
 function PanduanPage({ onBack }) {
