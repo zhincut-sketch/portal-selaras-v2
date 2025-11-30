@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, addDoc, onSnapshot, 
-  query, orderBy, updateDoc, deleteDoc, doc, where, serverTimestamp 
+  query, orderBy, updateDoc, deleteDoc, doc, where, serverTimestamp, setDoc
 } from "firebase/firestore";
 import { 
   getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, signInWithCustomToken, signInAnonymously 
@@ -709,9 +709,23 @@ function DashboardPage({ user, pesertaData, kejuruanOptions, isLoading, error, o
     const [galleryItems, setGalleryItems] = useState([]);
     const [isModerating, setIsModerating] = useState(false);
 
+    // STATE BARU: STATUS PENDAFTARAN
+    const [isRegOpen, setIsRegOpen] = useState(false);
+    const [regLoading, setRegLoading] = useState(true);
+
     // --- 2. FETCH DATA REALTIME ---
     useEffect(() => {
         if (!db || !user) return;
+
+        // 1. DENGARKAN SAKLAR PENDAFTARAN (Settings)
+        const unsubSettings = onSnapshot(doc(db, 'settings', 'config'), (docSnap) => {
+            if (docSnap.exists()) {
+                setIsRegOpen(docSnap.data().registrationOpen || false);
+            } else {
+                setIsRegOpen(false); // Default mati jika belum disetting
+            }
+            setRegLoading(false);
+        });
 
         // A. KOMENTAR
         const u1 = onSnapshot(query(getCommentsCollection(db), where("status", "==", "pending")), (s) => setPendingComments(s.docs.map(d => ({id:d.id, ...d.data()}))));
@@ -732,6 +746,23 @@ function DashboardPage({ user, pesertaData, kejuruanOptions, isLoading, error, o
     }, [user]);
 
     // --- 3. ACTION HANDLERS ---
+
+    // --- ACTION BARU: UBAH SAKLAR ---
+    const toggleRegistration = async () => {
+        if (!db) return;
+        const newState = !isRegOpen;
+        try {
+            // Simpan status ke Firebase
+            await setDoc(doc(db, 'settings', 'config'), { 
+                registrationOpen: newState,
+                updatedBy: user.email,
+                updatedAt: serverTimestamp()
+            }, { merge: true });
+        } catch (e) {
+            console.error("Gagal update status:", e);
+            alert("Gagal mengubah status pendaftaran.");
+        }
+    };
 
     // Hapus Permanen (Generic untuk semua koleksi)
     const handleDelete = async (collectionFunc, id, name) => {
@@ -965,6 +996,36 @@ function DashboardPage({ user, pesertaData, kejuruanOptions, isLoading, error, o
                         <p className="text-slate-400">Selamat datang, {user.email || "Petugas"}</p>
                     </div>
                 </div>
+
+                {/* --- FITUR SAKLAR (UPDATE) --- */}
+                <div className="mb-8 p-6 bg-slate-900 border border-slate-700 rounded-xl shadow-lg flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+                    <div>
+                        <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                            🚦 Status Formulir Pendaftaran
+                        </h3>
+                        <p className="text-sm text-slate-400 mt-1">
+                            Klik tombol di samping untuk Membuka/Menutup formulir pendaftaran di halaman Panduan.
+                        </p>
+                    </div>
+                    
+                    <div className="flex items-center gap-4 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                        <span className={`text-sm font-bold transition-colors ${isRegOpen ? 'text-emerald-400' : 'text-slate-500'}`}>
+                            {regLoading ? "Memuat..." : (isRegOpen ? "FORMULIR DIBUKA" : "FORMULIR DITUTUP")}
+                        </span>
+                        
+                        {/* TOMBOL TOGGLE */}
+                        <button 
+                            onClick={toggleRegistration}
+                            disabled={regLoading}
+                            className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 ${isRegOpen ? 'bg-emerald-600' : 'bg-slate-700'}`}
+                        >
+                            <span className={`${isRegOpen ? 'translate-x-7' : 'translate-x-1'} inline-block h-6 w-6 transform rounded-full bg-white transition-transform shadow-md`} />
+                        </button>
+                    </div>
+                </div>
+                {/* ------------------------------------------- */}
+
                 {!db && <div className="mb-6 p-4 bg-red-900/20 border border-red-500 rounded-lg text-red-200 text-sm font-bold animate-pulse">⚠️ Database Belum Terkoneksi.</div>}
                 
                 <div className="grid md:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -1727,307 +1788,232 @@ function ConsultationSystem({ dbInstance }) {
 }
 
 // --- LAKON DASAMUKA PAGE ---
+// --- LAKON DASAMUKA PAGE (REVISI: MODAL SPLIT VIEW & FULL IMAGE) ---
 function LakonDasamukaPage({ dbInstance, kejuruanOptions, lokerData, produkData }) {
   const [tab, setTab] = useState("loker");
   const [selectedLoker, setSelectedLoker] = useState(null);
   const [selectedProduk, setSelectedProduk] = useState(null);
 
+  // Helper untuk format gambar (sama seperti sebelumnya)
+  const getEmbedLink = (url) => {
+      if(!url) return "https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop";
+      // Gunakan fungsi convertToEmbedLink dari scope global App.jsx
+      // Asumsi fungsi convertToEmbedLink sudah ada di file App.jsx bagian atas
+      try {
+          // Kita panggil fungsi global convertToEmbedLink langsung
+          // Jika error "not defined", pastikan fungsi itu ada di luar komponen
+          return convertToEmbedLink(url); 
+      } catch (e) {
+          return url;
+      }
+  };
+
   return (
     <section id="dasamuka" className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
       <div className="max-w-6xl mx-auto px-4">
+        
+        {/* HEADER SECTION (SAMA) */}
         <div className="bg-slate-900/50 backdrop-blur-sm rounded-3xl p-6 md:p-10 border border-white/5 mb-8 animate-fade-in-up shadow-xl">
-  <div className="flex flex-col md:flex-row items-center gap-6 md:gap-10">
-    {/* LOGO DI KIRI */}
-    <div className="shrink-0">
-      <img
-        src="https://i.imgur.com/AHaLrmm.png" // Link logo Lakon Dasamuka
-        alt="Logo Lakon Dasamuka"
-        // Saya tambahkan sedikit efek bayangan pink agar sesuai dengan warna logonya
-        className="w-32 h-auto md:w-44 object-contain drop-shadow-[0_0_15px_rgba(236,72,153,0.3)] hover:scale-105 transition-transform"
-      />
-    </div>
-    {/* TEKS DI KANAN */}
-    <div className="text-center md:text-left flex-1">
-      <h1 className="text-3xl md:text-5xl font-extrabold mb-2 text-white uppercase tracking-tight">LAKON DASAMUKA</h1>
-      <p className="text-sm md:text-lg text-emerald-400 mb-3 font-medium tracking-wide">(Layanan Konsultasi – Datang Sapa Alumni Bekerja)</p>
-      <p className="text-sm text-slate-300 max-w-2xl mx-auto md:mx-0 leading-relaxed">
-        Portal khusus untuk alumni UPT BLK Kota Magelang sebagai wadah informasi karir, usaha, dan konsultasi.
-      </p>
-    </div>
-  </div>
-</div>
+          <div className="flex flex-col md:flex-row items-center gap-6 md:gap-10">
+            <div className="shrink-0">
+              <img src="https://i.imgur.com/AHaLrmm.png" alt="Logo Lakon Dasamuka" className="w-32 h-auto md:w-44 object-contain drop-shadow-[0_0_15px_rgba(236,72,153,0.3)] hover:scale-105 transition-transform" />
+            </div>
+            <div className="text-center md:text-left flex-1">
+              <h1 className="text-3xl md:text-5xl font-extrabold mb-2 text-white uppercase tracking-tight">LAKON DASAMUKA</h1>
+              <p className="text-sm md:text-lg text-emerald-400 mb-3 font-medium tracking-wide">(Layanan Konsultasi – Datang Sapa Alumni Bekerja)</p>
+              <p className="text-sm text-slate-300 max-w-2xl mx-auto md:mx-0 leading-relaxed">Portal khusus untuk alumni UPT BLK Kota Magelang sebagai wadah informasi karir, usaha, dan konsultasi.</p>
+            </div>
+          </div>
+        </div>
 
+        {/* TABS (SAMA) */}
         <div className="flex flex-wrap gap-2 justify-center md:justify-start items-center mb-8 text-sm border-b border-slate-800 pb-4">
           <button onClick={() => setTab("loker")} className={`px-6 py-2 rounded-full transition-all ${tab === 'loker' ? 'bg-emerald-500 text-white font-bold shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Info Lowongan Kerja</button>
           <button onClick={() => setTab("produk")} className={`px-6 py-2 rounded-full transition-all ${tab === 'produk' ? 'bg-emerald-500 text-white font-bold shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Produk Alumni</button>
           <button onClick={() => setTab("chat")} className={`px-6 py-2 rounded-full transition-all ${tab === 'chat' ? 'bg-emerald-500 text-white font-bold shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Chat Konsultasi</button>
         </div>
+
+        {/* CONTENT AREA */}
         <div className="min-h-[400px] animate-fade-in">
+          
+          {/* TAB LOKER */}
           {tab === 'loker' && (
-  <div className="space-y-6">
-    {/* Banner ajakan pasang lowongan */}
-    <div className="bg-gradient-to-r from-emerald-900/40 to-slate-900 border border-emerald-500/20 rounded-xl p-4 md:p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-      <div>
-        <h3 className="font-semibold text-emerald-300 text-sm md:text-base">
-          Anda Perusahaan?
-        </h3>
-        <p className="text-xs md:text-sm text-slate-300">
-          Pasang info lowongan kerja untuk alumni BLK secara gratis. Data akan dicek admin sebelum ditayangkan di portal.
-        </p>
-      </div>
-      <a
-        href={FORM_LOKER_URL}
-        target="_blank"
-        rel="noreferrer"
-        className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-sm font-semibold rounded-lg shadow-md inline-flex items-center gap-2 transition-all"
-      >
-        Pasang Lowongan
-      </a>
-    </div>
-
-    {/* Daftar lowongan */}
-    {lokerData && lokerData.length > 0 ? (
-  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-    {lokerData.map((job) => {
-  // --- BAGIAN 1: DEBUGGING (Cek Console Chrome nanti) ---
-  console.log("=== CEK DATA LOKER ===");
-  console.log("Judul:", job.title);
-  console.log("Link Asli:", job.image); 
-
-  // --- BAGIAN 2: LOGIKA GAMBAR ---
-  const fallbackImage = "https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop";
-  
-  // Kita cek: Kalau job.image ada, kita convert. Kalau tidak ada, pakai fallback.
-  const imageSrc = job.image ? convertToEmbedLink(job.image) : fallbackImage;
-  
-  console.log("Link Final:", imageSrc);
-
-  // --- BAGIAN 3: TAMPILAN (RETURN) ---
-  return (
-    <div
-      key={job.id}
-      className="bg-slate-900 rounded-xl border border-slate-800 hover:border-emerald-500/70 hover:shadow-lg hover:shadow-emerald-500/10 transition-all group cursor-pointer flex flex-col"
-      onClick={() => setSelectedLoker(job)}
-    >
-      {/* Gambar poster lowongan */}
-      <div className="h-40 bg-slate-800 overflow-hidden rounded-t-xl relative">
-        <img
-          src={imageSrc}
-          alt={job.title}
-          
-          // PENTING: Supaya Google tidak memblokir gambar
-          referrerPolicy="no-referrer"
-          
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-          onError={(e) => {
-            // Mencegah error berulang (looping)
-            if (e.currentTarget.src !== fallbackImage) {
-               e.currentTarget.src = fallbackImage;
-            }
-          }}
-        />
-
-        {job.status && (
-          <span className="absolute top-3 left-3 bg-emerald-500 text-xs font-semibold px-2 py-1 rounded-full text-white shadow-md">
-            {job.status}
-          </span>
-        )}
-      </div>
-
-      {/* Isi kartu lowongan */}
-      <div className="p-4 flex-1 flex flex-col">
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <h3 className="text-lg font-semibold text-white truncate">
-            {job.title}
-          </h3>
-        </div>
-
-        <p className="text-emerald-400 text-sm font-medium mb-2 line-clamp-1">
-          {job.company}
-        </p>
-
-        <div className="flex flex-wrap gap-2 text-xs text-slate-300 mb-3">
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-800/80 border border-slate-700/60">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            {job.location}
-          </span>
-          {job.education && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-slate-800/80 border border-slate-700/60">
-              {job.education}
-            </span>
+            <div className="space-y-6">
+                <div className="bg-gradient-to-r from-emerald-900/40 to-slate-900 border border-emerald-500/20 rounded-xl p-4 md:p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div><h3 className="font-semibold text-emerald-300 text-sm md:text-base">Anda Perusahaan?</h3><p className="text-xs md:text-sm text-slate-300">Pasang info lowongan kerja untuk alumni BLK secara gratis.</p></div>
+                    <a href={FORM_LOKER_URL} target="_blank" rel="noreferrer" className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 text-sm font-semibold rounded-lg shadow-md inline-flex items-center gap-2 transition-all">Pasang Lowongan</a>
+                </div>
+                {lokerData && lokerData.length > 0 ? (
+                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {lokerData.map((job) => (
+                            <div key={job.id} onClick={() => setSelectedLoker(job)} className="bg-slate-900 rounded-xl border border-slate-800 hover:border-emerald-500/70 hover:shadow-lg transition-all group cursor-pointer flex flex-col h-full">
+                                <div className="h-48 bg-slate-800 overflow-hidden rounded-t-xl relative">
+                                    <img src={getEmbedLink(job.image)} alt={job.title} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform" onError={(e) => {if(e.currentTarget.src !== "https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop") e.currentTarget.src = "https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop"}} />
+                                    {job.status && <span className="absolute top-3 left-3 bg-emerald-500 text-xs font-semibold px-2 py-1 rounded-full text-white shadow-md">{job.status}</span>}
+                                </div>
+                                <div className="p-4 flex-1 flex flex-col">
+                                    <h3 className="text-lg font-semibold text-white line-clamp-1 mb-1">{job.title}</h3>
+                                    <p className="text-emerald-400 text-sm font-medium mb-2 line-clamp-1">{job.company}</p>
+                                    <div className="flex flex-wrap gap-2 text-xs text-slate-300 mb-3">
+                                        <span className="bg-slate-800 border border-slate-700 px-2 py-1 rounded-md">{job.location}</span>
+                                        {job.education && <span className="bg-slate-800 border border-slate-700 px-2 py-1 rounded-md">{job.education}</span>}
+                                    </div>
+                                    <button className="mt-auto w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-bold text-emerald-400 transition-colors">Lihat Detail & Flyer</button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (<div className="text-center py-10 text-slate-500 border border-dashed border-slate-700 rounded-xl">Belum ada lowongan.</div>)}
+            </div>
           )}
-        </div>
 
-        <p className="text-slate-300 text-sm line-clamp-3 mb-4">
-          {job.desc}
-        </p>
-
-        <div className="mt-auto flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800/80">
-          <span>
-            Batas: <span className="text-emerald-400">{job.deadline}</span>
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Info Alumni
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-})}
-  </div>
-) : (
-  <div className="text-center py-10 text-slate-500 text-sm border border-dashed border-slate-700 rounded-xl">
-    Belum ada lowongan yang tersedia.
-  </div>
-)}
-
-  </div>
-)}
-
+          {/* TAB PRODUK */}
           {tab === 'produk' && (
             <div>
               <div className="bg-gradient-to-r from-blue-900/40 to-slate-900 border border-blue-500/20 rounded-xl p-4 mb-6 flex flex-col md:flex-row justify-between items-center gap-4"><div className="text-center md:text-left"><h4 className="text-blue-400 font-bold text-sm mb-1">Anda Alumni BLK?</h4><p className="text-slate-400 text-xs">Promosikan produk wirausaha Anda di sini secara gratis.</p></div><a href={FORM_PRODUK_URL} target="_blank" rel="noreferrer" className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-full shadow-lg transition-all flex items-center gap-2">Promosikan Produk</a></div>
               {produkData && produkData.length > 0 ? (
                   <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    {produkData.map((item) => {
-    // 1. Definisikan Fallback Image khusus Produk
-    const fallbackProduct = "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop";
-    
-    // 2. Proses Link Gambar (Gunakan fungsi convert yang sudah diperbarui)
-    const productSrc = item.image ? convertToEmbedLink(item.image) : fallbackProduct;
-
-    return (
-        <div 
-            key={item.id} 
-            className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden group hover:shadow-xl transition-all flex flex-col h-full cursor-pointer" 
-            onClick={() => setSelectedProduk(item)}
-        >
-            <div className="w-full h-48 bg-slate-800 relative overflow-hidden">
-                <img 
-                    src={productSrc} 
-                    alt={item.name} 
-                    
-                    // WAJIB: Supaya Google tidak memblokir
-                    referrerPolicy="no-referrer"
-                    
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
-                    onError={(e) => {
-                        if (e.currentTarget.src !== fallbackProduct) {
-                            e.currentTarget.src = fallbackProduct;
-                        }
-                    }} 
-                />
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
-                    <div className="text-white font-bold text-xl">{item.price}</div>
-                </div>
-            </div>
-            <div className="p-4 flex-1 flex flex-col">
-                <h4 className="font-bold text-white mb-1 line-clamp-2">{item.name}</h4>
-                <p className="text-xs text-emerald-400 mb-3 flex-1">{item.alumni}</p>
-                <button className="w-full py-2 mt-auto text-xs font-bold rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors flex items-center justify-center gap-2 border border-slate-700">Lihat Detail</button>
-            </div>
-        </div>
-    );
-})}
+                    {produkData.map((item) => (
+                        <div key={item.id} onClick={() => setSelectedProduk(item)} className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden group hover:shadow-xl transition-all flex flex-col h-full cursor-pointer">
+                            <div className="w-full h-48 bg-slate-800 relative overflow-hidden">
+                                <img src={getEmbedLink(item.image)} alt={item.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" onError={(e) => {if(e.currentTarget.src !== "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop") e.currentTarget.src = "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop"}} />
+                                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3"><div className="text-white font-bold text-xl">{item.price}</div></div>
+                            </div>
+                            <div className="p-4 flex-1 flex flex-col">
+                                <h4 className="font-bold text-white mb-1 line-clamp-2">{item.name}</h4>
+                                <p className="text-xs text-emerald-400 mb-3 flex-1">{item.alumni}</p>
+                                <button className="w-full py-2 mt-auto text-xs font-bold rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors flex items-center justify-center gap-2 border border-slate-700">Lihat Detail</button>
+                            </div>
+                        </div>
+                    ))}
                   </div>
-              ) : (
-                  <div className="text-center py-12 text-slate-500">Belum ada produk alumni yang ditampilkan.</div>
-              )}
+              ) : (<div className="text-center py-12 text-slate-500">Belum ada produk alumni.</div>)}
             </div>
           )}
+
+          {/* TAB CHAT */}
           {tab === 'chat' && (
             <div className="bg-slate-900 rounded-2xl p-4 border border-slate-800 relative overflow-hidden">
-              {/* NEW Q&A CONSULTATION SYSTEM */}
               <ConsultationSystem dbInstance={dbInstance} />
             </div>
           )}
         </div>
       </div>
 
+      {/* --- MODAL LOKER (REDESIGN: SPLIT VIEW) --- */}
       {selectedLoker && (
-        <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4 animate-fade-in">
-           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative">
-               <button onClick={() => setSelectedLoker(null)} className="absolute top-4 right-4 z-10 p-2 bg-black/50 rounded-full text-white hover:bg-red-600 transition-colors">X</button>
-               <div className="overflow-y-auto p-6">
-                <div className="relative h-40 bg-slate-800 overflow-hidden rounded-lg mb-4">
-                    <img
-        // TAMBAHKAN convertToEmbedLink DI SINI JUGA
-        src={convertToEmbedLink(selectedLoker.image) || "https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop"}
-        referrerPolicy="no-referrer"
-        alt={selectedLoker.title}
-        className="w-full h-full object-cover"
-        // ... onError handler ...
-    />
-                    <span className="absolute top-2 right-2 px-2 py-1 bg-emerald-500 text-white text-[10px] font-bold rounded shadow">{selectedLoker.status}</span>
-                </div>
-                <h3 className="text-white text-2xl font-bold mb-1">{selectedLoker.title}</h3>
-                <h4 className="text-emerald-400 font-medium text-sm mb-4">{selectedLoker.company}</h4>
-                
-                <div className='grid grid-cols-2 gap-4 text-sm mb-6'>
-                    <p className='text-slate-300 flex items-center gap-2'><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>{selectedLoker.location}</p>
-                    <p className='text-slate-300 flex items-center gap-2'><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.206 5 7.5 5 5.103 5 3 6.57 3 8.5c0 1.5 1.5 2.5 3.5 3.5 2.07 1.05 3.5 2 3.5 3V19m-4-8h11m-1.5 8h-8.5" /></svg>{selectedLoker.education}</p>
-                    <p className='text-slate-300 flex items-center gap-2'><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>{selectedLoker.deadline ? `Batas: ${selectedLoker.deadline}` : "Segera Kirim"}</p>
-                    <p className='text-slate-300 flex items-center gap-2'><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c1.657 0 3 .895 3 2s-1.343 2-3 2h-1c-1.657 0-3 .895-3 2s1.343 2 3 2m-3 0h6m-9 8h12a2 2 0 002-2v-1a2 2 0 00-2-2H9a2 2 0 00-2 2v1a2 2 0 002 2z" /></svg>{selectedLoker.freshGrad}</p>
-                </div>
+        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-2 md:p-4 animate-fade-in">
+           {/* Container Utama: Max Width Lebar (6xl) & Flex Row (Split) */}
+           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-6xl h-[90vh] md:h-[85vh] flex flex-col md:flex-row overflow-hidden shadow-2xl relative">
+               
+               {/* 1. BAGIAN KIRI: DETAIL TEKS (Order 2 di HP, Order 1 di PC) */}
+               <div className="w-full md:w-5/12 h-full bg-slate-900 flex flex-col order-2 md:order-1 border-r border-slate-800 relative">
+                   {/* Tombol Close Mobile (Hanya muncul di HP di pojok kanan atas bagian teks) */}
+                   <button onClick={() => setSelectedLoker(null)} className="md:hidden absolute top-2 right-2 p-2 bg-slate-800 rounded-full text-white z-20">✕</button>
 
-                <h5 className="font-bold text-white text-lg mt-6 mb-2">Deskripsi Pekerjaan</h5>
-                <p className="text-slate-400 whitespace-pre-wrap">{selectedLoker.desc}</p>
-                
-                {selectedLoker.benefits && (
-                    <>
-                        <h5 className="font-bold text-white text-lg mt-6 mb-2">Benefit & Fasilitas</h5>
-                        <p className="text-slate-400 whitespace-pre-wrap">{selectedLoker.benefits}</p>
-                    </>
-                )}
+                   <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                        <div className="mb-6">
+                            <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-bold rounded-full border border-emerald-500/30 uppercase tracking-wider">{selectedLoker.status || "Aktif"}</span>
+                            <h3 className="text-white text-2xl md:text-3xl font-bold mt-3 leading-tight">{selectedLoker.title}</h3>
+                            <h4 className="text-emerald-400 font-medium text-lg mt-1">{selectedLoker.company}</h4>
+                        </div>
+                        
+                        <div className='grid grid-cols-1 gap-3 text-sm mb-6 bg-slate-800/50 p-4 rounded-xl border border-slate-800'>
+                            <p className='text-slate-300 flex items-center gap-3'><span className="text-xl">📍</span> {selectedLoker.location}</p>
+                            <p className='text-slate-300 flex items-center gap-3'><span className="text-xl">🎓</span> {selectedLoker.education}</p>
+                            <p className='text-slate-300 flex items-center gap-3'><span className="text-xl">⏳</span> {selectedLoker.deadline ? `Batas: ${selectedLoker.deadline}` : "Segera Kirim"}</p>
+                            <p className='text-slate-300 flex items-center gap-3'><span className="text-xl">✨</span> {selectedLoker.freshGrad}</p>
+                        </div>
 
-                <div className='mt-8 pt-4 border-t border-slate-700 flex flex-col md:flex-row gap-4'>
-                    {selectedLoker.regLink && (
-                        <a href={selectedLoker.regLink} target="_blank" rel="noreferrer" className="flex-1 py-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold text-center transition-colors">Lamar Sekarang</a>
-                    )}
-                    <a href={`https://wa.me/${selectedLoker.contact}?text=Halo%2C%20saya%20tertarik%20dengan%20lowongan%20kerja%20${selectedLoker.title}%20dari%20web%20SELARAS.`} target="_blank" rel="noreferrer" className="flex-1 py-3 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold text-center transition-colors">Hubungi Perusahaan (WA)</a>
-                </div>
+                        <div className="prose prose-invert prose-sm max-w-none">
+                            <h5 className="font-bold text-white text-base mb-2">Deskripsi Pekerjaan</h5>
+                            <p className="text-slate-400 whitespace-pre-wrap leading-relaxed">{selectedLoker.desc}</p>
+                            
+                            {selectedLoker.benefits && (
+                                <>
+                                    <h5 className="font-bold text-white text-base mt-6 mb-2">Benefit & Fasilitas</h5>
+                                    <p className="text-slate-400 whitespace-pre-wrap leading-relaxed">{selectedLoker.benefits}</p>
+                                </>
+                            )}
+                        </div>
+                   </div>
+
+                   {/* Footer Tombol Aksi */}
+                   <div className='p-4 border-t border-slate-800 bg-slate-900 shrink-0 flex flex-col gap-3'>
+                        {selectedLoker.regLink && (
+                            <a href={selectedLoker.regLink} target="_blank" rel="noreferrer" className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold text-center transition-colors shadow-lg shadow-emerald-900/20">Lamar Sekarang</a>
+                        )}
+                        <a href={`https://wa.me/${selectedLoker.contact}?text=Halo...`} target="_blank" rel="noreferrer" className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold text-center transition-colors border border-slate-700">Hubungi via WhatsApp</a>
+                   </div>
+               </div>
+
+               {/* 2. BAGIAN KANAN: GAMBAR FULL (Order 1 di HP, Order 2 di PC) */}
+               <div className="w-full md:w-7/12 h-[40vh] md:h-full bg-black relative order-1 md:order-2 flex items-center justify-center p-2 md:p-8">
+                   {/* Tombol Close Desktop (Pojok Kanan Atas Gambar) */}
+                   <button onClick={() => setSelectedLoker(null)} className="hidden md:block absolute top-4 right-4 p-2 bg-black/50 hover:bg-red-600 rounded-full text-white transition-colors z-20 backdrop-blur-sm border border-white/10">
+                       <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                   </button>
+
+                   {/* GAMBAR FULL (OBJECT CONTAIN) */}
+                   <img
+                        src={getEmbedLink(selectedLoker.image)}
+                        referrerPolicy="no-referrer"
+                        alt={selectedLoker.title}
+                        className="max-w-full max-h-full object-contain shadow-2xl rounded-lg" // KUNCI: object-contain agar gambar pas & utuh
+                        onError={(e) => {if(e.currentTarget.src !== "https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop") e.currentTarget.src = "https://images.unsplash.com/photo-1521791136064-7986c2920216?q=80&w=1000&auto=format&fit=crop"}}
+                    />
                </div>
            </div>
         </div>
       )}
+
+      {/* --- MODAL PRODUK (REDESIGN: SPLIT VIEW) --- */}
       {selectedProduk && (
-        <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4 animate-fade-in">
-             <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative">
-                 <button onClick={() => setSelectedProduk(null)} className="absolute top-4 right-4 z-10 p-2 bg-black/50 rounded-full text-white hover:bg-red-600 transition-colors">X</button>
-                 <div className="overflow-y-auto p-6">
-                     <div className="relative h-64 bg-slate-800 overflow-hidden rounded-lg mb-4">
-                         <img 
-                       src={convertToEmbedLink(selectedProduk.image) || "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop"} 
-                       alt={selectedProduk.name} 
-                       
-                       // WAJIB: Tambahkan ini
-                       referrerPolicy="no-referrer"
-                       
-                       className="w-full h-full object-cover" 
-                       onError={(e) => e.target.src = 'https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop'} 
-                   />
-                         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3"><div className="text-white font-bold text-xl">{selectedProduk.price}</div></div>
-                     </div>
-                     <h3 className="text-white text-2xl font-bold mb-1">{selectedProduk.name}</h3>
-                     <h4 className="text-emerald-400 font-medium text-sm mb-4">Oleh: {selectedProduk.alumni} ({selectedProduk.trainingInfo})</h4>
+        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-2 md:p-4 animate-fade-in">
+             <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-5xl h-[90vh] md:h-[85vh] flex flex-col md:flex-row overflow-hidden shadow-2xl relative">
+                 
+                 {/* BAGIAN KIRI: TEKS */}
+                 <div className="w-full md:w-5/12 h-full bg-slate-900 flex flex-col order-2 md:order-1 border-r border-slate-800 relative">
+                     <button onClick={() => setSelectedProduk(null)} className="md:hidden absolute top-2 right-2 p-2 bg-slate-800 rounded-full text-white z-20">✕</button>
                      
-                     <h5 className="font-bold text-white text-lg mt-6 mb-2">Deskripsi Produk</h5>
-                     <p className="text-slate-400 whitespace-pre-wrap">{selectedProduk.desc}</p>
+                     <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                         <div className="mb-6">
+                            <span className="px-3 py-1 bg-blue-500/20 text-blue-400 text-xs font-bold rounded-full border border-blue-500/30 uppercase tracking-wider">Produk Alumni</span>
+                            <h3 className="text-white text-2xl md:text-3xl font-bold mt-3 leading-tight">{selectedProduk.name}</h3>
+                            <div className="text-2xl font-bold text-emerald-400 mt-2">{selectedProduk.price}</div>
+                         </div>
+                         
+                         <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-800 mb-6">
+                            <h4 className="text-slate-400 text-xs uppercase font-bold mb-2">Penjual</h4>
+                            <div className="text-white font-medium">{selectedProduk.alumni}</div>
+                            <div className="text-slate-500 text-xs mt-1">{selectedProduk.trainingInfo}</div>
+                         </div>
 
-                     <div className='grid grid-cols-2 gap-4 text-sm mt-6 pt-4 border-t border-slate-700'>
-                         <p className='text-slate-300 flex items-center gap-2'><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2v-5a2 2 0 012-2h10a2 2 0 012 2v5a2 2 0 01-2 2z" /></svg>Pengiriman: {selectedProduk.delivery}</p>
-                         {selectedProduk.socialLink && <a href={selectedProduk.socialLink} target="_blank" rel="noreferrer" className='text-slate-300 flex items-center gap-2 hover:text-blue-400 transition-colors'><svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.5 10.5L21 3m-3 0h5m0 0v5M4 14l7.5-7.5M4 14H3m7.5 7.5l-7.5-7.5" /></svg>Kunjungi Medsos</a>}
+                         <div className="prose prose-invert prose-sm">
+                             <h5 className="font-bold text-white">Deskripsi</h5>
+                             <p className="text-slate-300 whitespace-pre-wrap">{selectedProduk.desc}</p>
+                         </div>
+
+                         <div className='grid grid-cols-2 gap-4 text-xs mt-6 pt-4 border-t border-slate-800'>
+                             <p className='text-slate-400'>📦 Pengiriman: <span className="text-white block mt-1">{selectedProduk.delivery}</span></p>
+                             {selectedProduk.socialLink && <a href={selectedProduk.socialLink} target="_blank" rel="noreferrer" className='text-blue-400 hover:underline'>🌐 Kunjungi Medsos</a>}
+                         </div>
                      </div>
 
-                     <div className='mt-8 pt-4 border-t border-slate-700'>
-                         <a href={`https://wa.me/${selectedProduk.contact}?text=${encodeURIComponent(selectedProduk.wa_message)}`} target="_blank" rel="noreferrer" className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold text-center transition-colors flex items-center justify-center gap-2">
+                     <div className='p-4 border-t border-slate-800 bg-slate-900 shrink-0'>
+                         <a href={`https://wa.me/${selectedProduk.contact}?text=${encodeURIComponent(selectedProduk.wa_message)}`} target="_blank" rel="noreferrer" className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold text-center transition-colors flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20">
                              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
-                             Hubungi Penjual (WhatsApp)
+                             Beli via WhatsApp
                          </a>
                      </div>
                  </div>
-            </div>
+
+                 {/* BAGIAN KANAN: GAMBAR */}
+                 <div className="w-full md:w-7/12 h-[40vh] md:h-full bg-black relative order-1 md:order-2 flex items-center justify-center p-2 md:p-8">
+                     <button onClick={() => setSelectedProduk(null)} className="hidden md:block absolute top-4 right-4 p-2 bg-black/50 hover:bg-red-600 rounded-full text-white transition-colors z-20 backdrop-blur-sm border border-white/10">✕</button>
+                     <img src={getEmbedLink(selectedProduk.image)} referrerPolicy="no-referrer" alt={selectedProduk.name} className="max-w-full max-h-full object-contain shadow-2xl rounded-lg" onError={(e) => {if(e.currentTarget.src !== "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop") e.currentTarget.src = "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop"}} />
+                 </div>
+             </div>
         </div>
       )}
     </section>
@@ -2226,45 +2212,42 @@ function ChatWidget({ isOpen, setIsOpen, config }) {
 }
     
 
-// --- KOMPONEN PANDUAN & AKSES PENDAFTARAN (VERSI UPDATE) ---
-function PanduanPage({ onBack }) {
-  // GANTI STATUS INI JIKA PENDAFTARAN DIBUKA (true/false)
-  const isRegistrationOpen = false; 
+// --- UPDATE PANDUAN PAGE (BACA STATUS DARI DB) ---
+function PanduanPage({ onBack, db }) { // Pastikan menerima props 'db'
   
+  // Default mati, nanti nyala jika DB bilang nyala
+  const [isRegistrationOpen, setIsRegistrationOpen] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState(true);
+
+  // GANTI LINK GFORM DISINI
+  const LINK_PENDAFTARAN = "https://docs.google.com/forms/d/e/1FAIpQLSeucUkd1Wo9b5dv-xUpwzedyDrOnRymtGBd0CJg7gPIj0PgZg/viewform?usp=send_form"; // Contoh link, ganti punya Anda
+
   // State untuk popup panduan
   const [showGuideModal, setShowGuideModal] = useState(false);
 
-  // Data Menu Pintas (Sudah disesuaikan)
+  // --- LOGIKA BACA STATUS DARI DB ---
+  useEffect(() => {
+      if (!db) {
+          setLoadingStatus(false);
+          return;
+      }
+      // Dengarkan dokumen 'settings/config'
+      const unsubscribe = onSnapshot(doc(db, 'settings', 'config'), (docSnap) => {
+          if (docSnap.exists()) {
+              setIsRegistrationOpen(docSnap.data().registrationOpen || false);
+          } else {
+              setIsRegistrationOpen(false); 
+          }
+          setLoadingStatus(false);
+      });
+      return () => unsubscribe();
+  }, [db]);
+
   const links = [
-    { 
-      id: "guide",
-      title: "Panduan Pelatihan Skillhub (APBN)", 
-      icon: "📋", 
-      desc: "Cara buat akun & daftar pelatihan", 
-      color: "blue",
-      isModal: true // Penanda khusus agar membuka modal
-    },
-    { 
-      title: "Instagram BLK", 
-      icon: "📸", 
-      desc: "Info update jadwal terbaru", 
-      url: "https://instagram.com/blkkotamagelang", 
-      color: "pink" 
-    },
-    { 
-      title: "Lokasi / Peta", 
-      icon: "📍", 
-      desc: "Cek lokasi via Google Maps", 
-      url: "https://maps.app.goo.gl/rF91y7o5sP9p5s67A", // Link Maps BLK Magelang
-      color: "red" 
-    }, 
-    { 
-      title: "Admin WhatsApp", 
-      icon: "💬", 
-      desc: "Tanya jawab langsung", 
-      url: "https://wa.me/6285741720129", 
-      color: "emerald" 
-    },
+    { id: "guide", title: "Panduan Pelatihan Skillhub (APBN)", icon: "📋", desc: "Cara buat akun & daftar pelatihan", color: "blue", isModal: true },
+    { title: "Instagram BLK", icon: "📸", desc: "Info update jadwal terbaru", url: "https://instagram.com/blkkotamagelang", color: "pink" },
+    { title: "Lokasi / Peta", icon: "📍", desc: "Cek lokasi via Google Maps", url: "https://maps.app.goo.gl/rF91y7o5sP9p5s67A", color: "red" }, 
+    { title: "Admin WhatsApp", icon: "💬", desc: "Tanya jawab langsung", url: "https://wa.me/6285741720129", color: "emerald" },
   ];
 
   return (
@@ -2278,123 +2261,71 @@ function PanduanPage({ onBack }) {
           </p>
         </div>
 
-        {/* STATUS BANNER */}
-        <div className={`p-6 rounded-2xl border ${isRegistrationOpen ? 'bg-emerald-900/30 border-emerald-500/50' : 'bg-yellow-900/30 border-yellow-500/50'} text-center mb-12 shadow-lg animate-fade-in`}>
-            <h2 className={`text-xl font-bold mb-2 ${isRegistrationOpen ? 'text-emerald-400' : 'text-yellow-400'}`}>
-                STATUS PENDAFTARAN: {isRegistrationOpen ? "SEDANG DIBUKA" : "BELUM DIBUKA / TUTUP"}
-            </h2>
-            <p className="text-slate-300 text-sm mb-6">
-                {isRegistrationOpen 
-                    ? "Silakan klik tombol di bawah untuk mengisi formulir pendaftaran." 
-                    : "Mohon maaf, pendaftaran pelatihan saat ini sedang ditutup. Pantau terus Instagram kami untuk update jadwal terbaru."}
-            </p>
+        {/* STATUS BANNER (DINAMIS DARI ADMIN) */}
+        <div className={`p-6 rounded-2xl border transition-all duration-500 ${loadingStatus ? 'bg-slate-900 border-slate-700' : (isRegistrationOpen ? 'bg-emerald-900/30 border-emerald-500/50' : 'bg-yellow-900/30 border-yellow-500/50')} text-center mb-12 shadow-lg animate-fade-in`}>
             
-            {/* TOMBOL DAFTAR UTAMA (Non-aktif jika tutup) */}
-            {isRegistrationOpen ? (
-                <a href="#" className="inline-block px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-full shadow-lg shadow-emerald-500/30 transition-transform transform hover:-translate-y-1">
-                    👉 ISI FORMULIR PENDAFTARAN
-                </a>
+            {loadingStatus ? (
+                <div className="text-slate-400 text-sm animate-pulse">Memuat status pendaftaran...</div>
             ) : (
-                <button disabled className="px-8 py-4 bg-slate-700 text-slate-400 font-bold rounded-full cursor-not-allowed border border-slate-600">
-                    Formulir Belum Dapat Diakses
-                </button>
+                <>
+                    <h2 className={`text-xl font-bold mb-2 ${isRegistrationOpen ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                        STATUS PENDAFTARAN: {isRegistrationOpen ? "SEDANG DIBUKA" : "BELUM DIBUKA / TUTUP"}
+                    </h2>
+                    <p className="text-slate-300 text-sm mb-6">
+                        {isRegistrationOpen 
+                            ? "Silakan klik tombol di bawah untuk mengisi formulir pendaftaran." 
+                            : "Mohon maaf, formulir pendaftaran saat ini sedang dikunci oleh Admin."}
+                    </p>
+                    
+                    {/* TOMBOL LINK GFORM (BERUBAH SESUAI STATUS) */}
+                    {isRegistrationOpen ? (
+                        <a href={LINK_PENDAFTARAN} target="_blank" rel="noreferrer" className="inline-block px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-full shadow-lg shadow-emerald-500/30 transition-transform transform hover:-translate-y-1">
+                            👉 ISI FORMULIR PENDAFTARAN
+                        </a>
+                    ) : (
+                        <button disabled className="px-8 py-4 bg-slate-700 text-slate-500 font-bold rounded-full cursor-not-allowed border border-slate-600">
+                            Formulir Belum Dapat Diakses
+                        </button>
+                    )}
+                </>
             )}
         </div>
 
-        {/* GRID MENU INFORMASI */}
+        {/* GRID MENU INFORMASI (TETAP MUNCUL APAPUN STATUSNYA) */}
         <h3 className="text-white font-bold text-lg mb-6 border-l-4 border-blue-500 pl-3">Menu Informasi</h3>
         <div className="grid md:grid-cols-2 gap-4">
             {links.map((link, idx) => (
                 link.isModal ? (
-                    // CARD UNTUK PANDUAN (MEMBUKA MODAL)
-                    <button 
-                        key={idx}
-                        onClick={() => setShowGuideModal(true)}
-                        className="flex items-center gap-4 p-4 bg-slate-900 border border-slate-800 rounded-xl hover:border-emerald-500/50 hover:bg-slate-800 transition-all group text-left w-full"
-                    >
-                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl bg-${link.color}-500/10 text-${link.color}-400 group-hover:scale-110 transition-transform`}>
-                            {link.icon}
-                        </div>
-                        <div>
-                            <h4 className="text-white font-bold text-sm group-hover:text-emerald-400 transition-colors">{link.title}</h4>
-                            <p className="text-xs text-slate-400">{link.desc}</p>
-                        </div>
+                    <button key={idx} onClick={() => setShowGuideModal(true)} className="flex items-center gap-4 p-4 bg-slate-900 border border-slate-800 rounded-xl hover:border-emerald-500/50 hover:bg-slate-800 transition-all group text-left w-full">
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl bg-${link.color}-500/10 text-${link.color}-400 group-hover:scale-110 transition-transform`}>{link.icon}</div>
+                        <div><h4 className="text-white font-bold text-sm group-hover:text-emerald-400 transition-colors">{link.title}</h4><p className="text-xs text-slate-400">{link.desc}</p></div>
                         <div className="ml-auto text-slate-600 group-hover:text-white transition-colors">↓</div>
                     </button>
                 ) : (
-                    // CARD MENU BIASA (LINK EXTERNAL)
-                    <a 
-                        key={idx} 
-                        href={link.url} 
-                        target="_blank" 
-                        rel="noreferrer"
-                        className="flex items-center gap-4 p-4 bg-slate-900 border border-slate-800 rounded-xl hover:border-emerald-500/50 hover:bg-slate-800 transition-all group"
-                    >
-                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl bg-${link.color}-500/10 text-${link.color}-400 group-hover:scale-110 transition-transform`}>
-                            {link.icon}
-                        </div>
-                        <div>
-                            <h4 className="text-white font-bold text-sm group-hover:text-emerald-400 transition-colors">{link.title}</h4>
-                            <p className="text-xs text-slate-400">{link.desc}</p>
-                        </div>
+                    <a key={idx} href={link.url} target="_blank" rel="noreferrer" className="flex items-center gap-4 p-4 bg-slate-900 border border-slate-800 rounded-xl hover:border-emerald-500/50 hover:bg-slate-800 transition-all group">
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl bg-${link.color}-500/10 text-${link.color}-400 group-hover:scale-110 transition-transform`}>{link.icon}</div>
+                        <div><h4 className="text-white font-bold text-sm group-hover:text-emerald-400 transition-colors">{link.title}</h4><p className="text-xs text-slate-400">{link.desc}</p></div>
                         <div className="ml-auto text-slate-600 group-hover:text-white transition-colors">→</div>
                     </a>
                 )
             ))}
         </div>
-
-        {/* TOMBOL KEMBALI */}
-        <div className="mt-12 text-center">
-            <button onClick={onBack} className="text-slate-400 hover:text-white text-sm underline">Kembali ke Beranda</button>
-        </div>
-
-        {/* --- MODAL POPUP PANDUAN --- */}
+        <div className="mt-12 text-center"><button onClick={onBack} className="text-slate-400 hover:text-white text-sm underline">Kembali ke Beranda</button></div>
+        
+        {/* MODAL PANDUAN */}
         {showGuideModal && (
             <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4 animate-fade-in">
                 <div className="bg-slate-900 border border-blue-500/50 rounded-2xl w-full max-w-md shadow-2xl p-6 relative">
                     <button onClick={() => setShowGuideModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">✕</button>
-                    
-                    <div className="text-center mb-6">
-                        <div className="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-full flex items-center justify-center text-2xl mx-auto mb-3">📚</div>
-                        <h3 className="text-xl font-bold text-white">Panduan Skillhub</h3>
-                        <p className="text-xs text-slate-400 mt-1">Silakan pilih panduan yang ingin Anda baca.</p>
-                    </div>
-
+                    <div className="text-center mb-6"><div className="w-12 h-12 bg-blue-500/20 text-blue-400 rounded-full flex items-center justify-center text-2xl mx-auto mb-3">📚</div><h3 className="text-xl font-bold text-white">Panduan Skillhub</h3><p className="text-xs text-slate-400 mt-1">Silakan pilih panduan yang ingin Anda baca.</p></div>
                     <div className="space-y-3">
-                        <a 
-                            href="https://drive.google.com/file/d/14MHZdNWKvHCc1SJruMQPwAN27GG7g4cJ/view" 
-                            target="_blank" 
-                            rel="noreferrer"
-                            className="flex items-center gap-3 p-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-blue-500 rounded-xl transition-all group"
-                        >
-                            <span className="text-2xl">📝</span>
-                            <div className="text-left">
-                                <div className="text-sm font-bold text-white group-hover:text-blue-400">Panduan Pendaftaran Pelatihan</div>
-                                <div className="text-[10px] text-slate-400">Langkah mendaftar pelatihan di Skillhub</div>
-                            </div>
-                        </a>
-
-                        <a 
-                            href="https://drive.google.com/file/d/1fA84i4JWZPUJcnOjH_AP51kmzSlcAolv/view" 
-                            target="_blank" 
-                            rel="noreferrer"
-                            className="flex items-center gap-3 p-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-blue-500 rounded-xl transition-all group"
-                        >
-                            <span className="text-2xl">👤</span>
-                            <div className="text-left">
-                                <div className="text-sm font-bold text-white group-hover:text-blue-400">Panduan Membuat Akun</div>
-                                <div className="text-[10px] text-slate-400">Cara registrasi akun SIAPkerja / Skillhub</div>
-                            </div>
-                        </a>
+                        <a href="https://drive.google.com/file/d/14MHZdNWKvHCc1SJruMQPwAN27GG7g4cJ/view" target="_blank" rel="noreferrer" className="flex items-center gap-3 p-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-blue-500 rounded-xl transition-all group"><span className="text-2xl">📝</span><div className="text-left"><div className="text-sm font-bold text-white group-hover:text-blue-400">Panduan Pendaftaran Pelatihan</div><div className="text-[10px] text-slate-400">Langkah mendaftar pelatihan di Skillhub</div></div></a>
+                        <a href="https://drive.google.com/file/d/1fA84i4JWZPUJcnOjH_AP51kmzSlcAolv/view" target="_blank" rel="noreferrer" className="flex items-center gap-3 p-4 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-blue-500 rounded-xl transition-all group"><span className="text-2xl">👤</span><div className="text-left"><div className="text-sm font-bold text-white group-hover:text-blue-400">Panduan Membuat Akun</div><div className="text-[10px] text-slate-400">Cara registrasi akun SIAPkerja / Skillhub</div></div></a>
                     </div>
-
-                    <button onClick={() => setShowGuideModal(false)} className="mt-6 w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold rounded-lg transition-colors">
-                        Tutup
-                    </button>
+                    <button onClick={() => setShowGuideModal(false)} className="mt-6 w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-bold rounded-lg transition-colors">Tutup</button>
                 </div>
             </div>
         )}
-
       </div>
     </section>
   );
@@ -2917,7 +2848,7 @@ useEffect(() => {
   const renderPage = () => {
     if (currentPage === "beranda") return <BerandaPage allStatsData={allStatsData} staticStatsData={[]} allScheduleData={allScheduleData} galleryData={galleryData} kejuruanOptions={kejuruanOptions} isLoading={isLoading} error={error} setCurrentPage={setCurrentPage}/>;
     if (currentPage === "dasamuka") return <LakonDasamukaPage dbInstance={db} kejuruanOptions={kejuruanOptions} lokerData={lokerData} produkData={produkData} />;
-    if (currentPage === "panduan") return <PanduanPage onBack={() => setCurrentPage("beranda")} />;
+    if (currentPage === "panduan") return <PanduanPage db={db} onBack={() => setCurrentPage("beranda")} />;
 
     // UPDATE: Hapus force_guest_mode saat login berhasil
     if (currentPage === "login") return <LoginPage onLogin={(u) => {
