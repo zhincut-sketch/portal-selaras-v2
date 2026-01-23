@@ -79,6 +79,23 @@ const getProductsCollection = (dbInstance) => {
   return collection(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'products');
 };
 
+// Koleksi Kisah Sukses (Success Stories)
+const getSuccessStoriesCollection = (dbInstance) => {
+  const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  return collection(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'success_stories');
+};
+
+// --- KOLEKSI BARU UNTUK BERANDA ---
+const getAnnouncementsCollection = (dbInstance) => {
+  const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  return collection(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'announcements');
+};
+
+const getActivityUpdatesCollection = (dbInstance) => {
+  const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  return collection(dbInstance, 'artifacts', currentAppId, 'public', 'data', 'activity_updates');
+};
+
 // --- TAMBAHAN HELPER KOLEKSI GALERI ---
 const getGalleryCollection = (dbInstance) => {
   const currentAppId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -692,8 +709,17 @@ function ConsultationAdminView({ dbInstance, onBack }) {
 // ==============================================================================
 // 1. KOMPONEN UTAMA DASHBOARD PAGE (VERSI FINAL: GFORM LINK + HAPUS ITEM)
 // ==============================================================================
-function DashboardPage({ user, pesertaData, kejuruanOptions, isLoading, error, onBackToHome }) {
+// 1. Terima props baru: announcementData, activityData
+function DashboardPage({ user, pesertaData, kejuruanOptions, isLoading, error, onBackToHome, announcementData, activityData }) {
     const [view, setView] = useState('main');
+    
+    // ... (State lama biarkan) ...
+
+    // --- STATE BARU UNTUK INPUT FORM ---
+    const [newFlyerImage, setNewFlyerImage] = useState("");
+    const [newActivityImage, setNewActivityImage] = useState("");
+    const [newActivityCaption, setNewActivityCaption] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
     
     // --- STATE DATA ---
     const [pendingComments, setPendingComments] = useState([]);
@@ -785,6 +811,44 @@ function DashboardPage({ user, pesertaData, kejuruanOptions, isLoading, error, o
         } 
         catch (e) { console.error(e); } 
         finally { setIsModerating(false); }
+    };
+
+    // --- FUNGSI INPUT FLYER / PENGUMUMAN ---
+    const handleAddAnnouncement = async (e) => {
+        e.preventDefault();
+        if (!newFlyerImage.trim()) return;
+        setIsSubmitting(true);
+        try {
+            await addDoc(getAnnouncementsCollection(db), {
+                image: newFlyerImage.trim(),
+                createdAt: serverTimestamp()
+            });
+            setNewFlyerImage(""); // Reset form
+            alert("Flyer berhasil ditambahkan!");
+        } catch (e) {
+            console.error(e);
+            alert("Gagal menambah flyer.");
+        } finally { setIsSubmitting(false); }
+    };
+
+    // --- FUNGSI INPUT KEGIATAN ---
+    const handleAddActivity = async (e) => {
+        e.preventDefault();
+        if (!newActivityImage.trim()) return;
+        setIsSubmitting(true);
+        try {
+            await addDoc(getActivityUpdatesCollection(db), {
+                image: newActivityImage.trim(),
+                caption: newActivityCaption.trim(),
+                createdAt: serverTimestamp()
+            });
+            setNewActivityImage(""); // Reset form
+            setNewActivityCaption("");
+            alert("Update kegiatan berhasil ditambahkan!");
+        } catch (e) {
+            console.error(e);
+            alert("Gagal menambah kegiatan.");
+        } finally { setIsSubmitting(false); }
     };
 
     // --- 4. RENDER SUB-VIEWS ---
@@ -986,6 +1050,80 @@ function DashboardPage({ user, pesertaData, kejuruanOptions, isLoading, error, o
         );
     }
 
+    // VIEW BARU: KELOLA BERANDA (Homepage)
+    if (view === 'homepage') {
+        return (
+            <section className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
+                <div className="max-w-5xl mx-auto px-4">
+                    <button onClick={() => setView('main')} className="text-emerald-400 mb-6 flex items-center gap-2 hover:underline">← Kembali ke Dashboard</button>
+                    <h2 className="text-3xl font-bold text-white mb-8 border-b border-slate-800 pb-4">Kelola Konten Beranda</h2>
+
+                    <div className="grid md:grid-cols-2 gap-12">
+                        {/* KOLOM KIRI: FLYER PENGUMUMAN */}
+                        <div>
+                            <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 mb-6">
+                                <h3 className="text-emerald-400 font-bold mb-4 flex items-center gap-2">📢 Tambah Flyer Pendaftaran</h3>
+                                <form onSubmit={handleAddAnnouncement} className="space-y-4">
+                                    <div>
+                                        <label className="text-xs text-slate-400 uppercase font-bold">Link Gambar (G-Drive/Direct)</label>
+                                        <input type="text" value={newFlyerImage} onChange={(e) => setNewFlyerImage(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-700 rounded-lg text-white text-sm focus:border-emerald-500 outline-none" placeholder="https://..." required />
+                                    </div>
+                                    <button disabled={isSubmitting} className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-sm">
+                                        {isSubmitting ? "Menyimpan..." : "+ Upload Flyer"}
+                                    </button>
+                                </form>
+                            </div>
+
+                            <h4 className="text-white font-bold mb-3">Daftar Flyer Tayang ({announcementData?.length || 0})</h4>
+                            <div className="space-y-3">
+                                {announcementData && announcementData.map(item => (
+                                    <div key={item.id} className="flex gap-3 bg-slate-900 p-3 rounded-lg border border-slate-800 items-center">
+                                        <img src={convertToEmbedLink(item.image)} className="w-16 h-16 object-cover rounded bg-slate-800" alt="Flyer" />
+                                        <div className="flex-1 overflow-hidden"><p className="text-xs text-slate-400 truncate">{item.image}</p></div>
+                                        <button onClick={() => handleDelete(getAnnouncementsCollection, item.id, "Flyer ini")} className="px-3 py-1 bg-red-900/30 text-red-400 rounded hover:bg-red-600 hover:text-white text-xs font-bold transition-colors">Hapus</button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* KOLOM KANAN: UPDATE KEGIATAN */}
+                        <div>
+                            <div className="bg-slate-900 p-6 rounded-xl border border-slate-800 mb-6">
+                                <h3 className="text-blue-400 font-bold mb-4 flex items-center gap-2">📸 Tambah Kegiatan Baru</h3>
+                                <form onSubmit={handleAddActivity} className="space-y-4">
+                                    <div>
+                                        <label className="text-xs text-slate-400 uppercase font-bold">Link Foto</label>
+                                        <input type="text" value={newActivityImage} onChange={(e) => setNewActivityImage(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-700 rounded-lg text-white text-sm focus:border-blue-500 outline-none" placeholder="https://..." required />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-slate-400 uppercase font-bold">Caption / Keterangan</label>
+                                        <textarea rows="3" value={newActivityCaption} onChange={(e) => setNewActivityCaption(e.target.value)} className="w-full p-3 bg-slate-950 border border-slate-700 rounded-lg text-white text-sm focus:border-blue-500 outline-none resize-none" placeholder="Deskripsi kegiatan..." />
+                                    </div>
+                                    <button disabled={isSubmitting} className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg text-sm">
+                                        {isSubmitting ? "Menyimpan..." : "+ Upload Kegiatan"}
+                                    </button>
+                                </form>
+                            </div>
+
+                            <h4 className="text-white font-bold mb-3">Riwayat Kegiatan ({activityData?.length || 0})</h4>
+                            <div className="space-y-3 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+                                {activityData && activityData.map(item => (
+                                    <div key={item.id} className="flex gap-3 bg-slate-900 p-3 rounded-lg border border-slate-800">
+                                        <img src={convertToEmbedLink(item.image)} className="w-16 h-16 object-cover rounded bg-slate-800 shrink-0" alt="Kegiatan" />
+                                        <div className="flex-1">
+                                            <p className="text-xs text-slate-300 line-clamp-2 mb-2">{item.caption || "Tanpa caption"}</p>
+                                            <button onClick={() => handleDelete(getActivityUpdatesCollection, item.id, "Kegiatan ini")} className="text-red-400 hover:text-red-300 text-[10px] font-bold underline">Hapus Permanen</button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        );
+    }
+
     // MAIN VIEW (MENU UTAMA DASHBOARD)
     return (
         <section className="pt-24 md:pt-32 pb-16 min-h-screen bg-slate-950">
@@ -1034,6 +1172,7 @@ function DashboardPage({ user, pesertaData, kejuruanOptions, isLoading, error, o
                     <DashButton icon="📷" label="Manajemen Galeri" count={galleryItems.length} onClick={() => setView('gallery')} color="pink" />
                     <DashButton icon="🙋‍♂️" label="Konsultasi" count={0} onClick={() => setView('consultation')} color="yellow" />
                     <DashButton icon="👥" label="Data Peserta" count={0} onClick={() => setView('peserta')} color="purple" />
+                    <DashButton icon="🏠" label="Kelola Beranda" count={0} onClick={() => setView('homepage')} color="pink" />
                 </div>
 
                 <div className="mt-8 bg-slate-900 p-6 rounded-xl border border-slate-800">
@@ -1192,7 +1331,7 @@ function PesertaDatabaseView({ pesertaData, isLoading, error, onBack, kejuruanOp
 }
 
 // --- KOMPONEN BERANDA (VERSI FINAL: GALERI GABUNG + NAVIGASI PANDUAN) ---
-function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryData, kejuruanOptions, isLoading, error, setCurrentPage }) {
+function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryData, kejuruanOptions, isLoading, error, setCurrentPage, announcementData, activityData }) {
   // CATATAN: State 'galleryType' sudah DIHAPUS karena tidak dipakai lagi.
   
   const [yearFilter, setYearFilter] = useState("berjalan");
@@ -1234,6 +1373,13 @@ function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryDa
   ];
   
   const finalDisplayStats = [...displayStats, ...(staticStatsData || [])];
+
+  // Helper Convert Link Gambar (Copy ini ke dalam BerandaPage)
+  const getEmbedLink = (url) => {
+      if(!url) return "https://images.unsplash.com/photo-1556742049-0cfed4f7a07d?q=80&w=1000&auto=format&fit=crop";
+      // Coba pakai fungsi global convertToEmbedLink kalau ada
+      try { return convertToEmbedLink(url); } catch (e) { return url; }
+  };
 
   return (
     <>
@@ -1299,6 +1445,38 @@ function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryDa
         </div>
       </section>
 
+      {/* --- BAGIAN BARU 1: PENGUMUMAN / FLYER --- */}
+      {announcementData && announcementData.length > 0 && (
+        <section className="py-12 bg-slate-950 border-b border-white/5 relative overflow-hidden">
+            {/* Background Effect */}
+            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-[80px] -z-10"></div>
+            
+            <div className="max-w-6xl mx-auto px-4">
+                <div className="flex items-center gap-3 mb-8">
+                    <span className="w-1 h-8 bg-emerald-500 rounded-full"></span>
+                    <h3 className="text-2xl font-bold text-white">Info & Pendaftaran Terbaru</h3>
+                </div>
+
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {announcementData.map((item) => (
+                        <div key={item.id} className="group relative rounded-2xl overflow-hidden shadow-2xl border border-slate-800 hover:border-emerald-500/50 transition-all">
+                            <img 
+                                src={getEmbedLink(item.image)} 
+                                alt="Flyer Pengumuman" 
+                                className="w-full h-auto object-cover transform group-hover:scale-105 transition-transform duration-500"
+                                onError={(e) => e.target.src = "https://placehold.co/600x800?text=Flyer+Image"}
+                            />
+                            {/* Efek Kilau saat hover */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-6">
+                                <button onClick={() => window.open(getEmbedLink(item.image), '_blank')} className="w-full py-2 bg-emerald-600 text-white font-bold rounded-lg text-sm shadow-lg">Lihat Full Gambar</button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </section>
+      )}
+
       {/* 3. JADWAL SECTION */}
       <section id="jadwal" className="py-16 bg-gradient-to-b from-slate-900 to-slate-950">
         <div className="max-w-6xl mx-auto px-4">
@@ -1342,6 +1520,42 @@ function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryDa
           </div>
         </div>
       </section>
+
+      {/* --- BAGIAN BARU 2: UPDATE KEGIATAN BLK --- */}
+      {activityData && activityData.length > 0 && (
+        <section className="py-16 bg-slate-900 border-t border-slate-800">
+            <div className="max-w-6xl mx-auto px-4">
+                <div className="text-center mb-10">
+                    <span className="text-emerald-400 font-bold tracking-widest text-xs uppercase mb-2 block">Sekilas Info</span>
+                    <h3 className="text-3xl font-extrabold text-white">Update Kegiatan BLK</h3>
+                    <div className="w-20 h-1 bg-emerald-500 mx-auto mt-4 rounded-full"></div>
+                </div>
+
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {activityData.map((activity) => (
+                        <div key={activity.id} className="bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 hover:-translate-y-2 transition-transform duration-300 shadow-lg">
+                            <div className="h-48 overflow-hidden relative">
+                                <img 
+                                    src={getEmbedLink(activity.image)} 
+                                    alt="Kegiatan" 
+                                    className="w-full h-full object-cover"
+                                    onError={(e) => e.target.src = "https://placehold.co/600x400?text=Foto+Kegiatan"}
+                                />
+                                <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-[10px] text-white font-mono">
+                                    {activity.createdAt?.seconds ? new Date(activity.createdAt.seconds * 1000).toLocaleDateString("id-ID") : "Terbaru"}
+                                </div>
+                            </div>
+                            <div className="p-5">
+                                <p className="text-slate-300 text-sm leading-relaxed line-clamp-4">
+                                    {activity.caption || "Tidak ada keterangan."}
+                                </p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </section>
+      )}
 
       {/* 4. GALERI SECTION (UPDATE: GABUNGAN FOTO & VIDEO) */}
       <section id="galeri" className="py-16 bg-slate-950 relative">
@@ -1789,10 +2003,11 @@ function ConsultationSystem({ dbInstance }) {
 
 // --- LAKON DASAMUKA PAGE ---
 // --- LAKON DASAMUKA PAGE (REVISI: MODAL SPLIT VIEW & FULL IMAGE) ---
-function LakonDasamukaPage({ dbInstance, kejuruanOptions, lokerData, produkData }) {
+function LakonDasamukaPage({ dbInstance, kejuruanOptions, lokerData, produkData, successStoriesData}) {
   const [tab, setTab] = useState("loker");
   const [selectedLoker, setSelectedLoker] = useState(null);
   const [selectedProduk, setSelectedProduk] = useState(null);
+  const [selectedStory, setSelectedStory] = useState(null);
 
   // Helper untuk format gambar (sama seperti sebelumnya)
   const getEmbedLink = (url) => {
@@ -1831,6 +2046,7 @@ function LakonDasamukaPage({ dbInstance, kejuruanOptions, lokerData, produkData 
           <button onClick={() => setTab("loker")} className={`px-6 py-2 rounded-full transition-all ${tab === 'loker' ? 'bg-emerald-500 text-white font-bold shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Info Lowongan Kerja</button>
           <button onClick={() => setTab("produk")} className={`px-6 py-2 rounded-full transition-all ${tab === 'produk' ? 'bg-emerald-500 text-white font-bold shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Produk Alumni</button>
           <button onClick={() => setTab("chat")} className={`px-6 py-2 rounded-full transition-all ${tab === 'chat' ? 'bg-emerald-500 text-white font-bold shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Chat Konsultasi</button>
+          <button onClick={() => setTab("success")} className={`px-6 py-2 rounded-full transition-all ${tab === 'success' ? 'bg-emerald-500 text-white font-bold shadow-lg' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>Kisah Sukses</button>
         </div>
 
         {/* CONTENT AREA */}
@@ -1899,6 +2115,55 @@ function LakonDasamukaPage({ dbInstance, kejuruanOptions, lokerData, produkData 
           )}
         </div>
       </div>
+
+          {/* TAB SUCCESS STORY (POSTER) */}
+{tab === "success" && (
+  <div>
+    <div className="bg-gradient-to-r from-purple-900/40 to-slate-900 border border-purple-500/20 rounded-xl p-4 mb-6 text-center md:text-left">
+      <h4 className="text-purple-400 font-bold text-sm mb-1">
+        Hall of Fame
+      </h4>
+      <p className="text-slate-400 text-xs">
+        Galeri poster alumni sukses BLK Kota Magelang.
+      </p>
+    </div>
+
+    {successStoriesData?.length > 0 ? (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {successStoriesData.map((story) => (
+          <div
+            key={story.id}
+            onClick={() => setSelectedStory(story)}
+            className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden group hover:shadow-xl hover:shadow-purple-900/20 transition-all cursor-pointer relative h-64 md:h-80"
+          >
+            <img
+              src={getEmbedLink(story.image)}
+              alt="Poster Success Story"
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.src =
+                  "https://placehold.co/600x800?text=Poster+Image";
+              }}
+            />
+
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center">
+              <span className="opacity-0 group-hover:opacity-100 bg-black/60 text-white px-3 py-1 rounded-full text-xs font-bold backdrop-blur-sm transform translate-y-2 group-hover:translate-y-0 transition-all">
+                🔍 Lihat Detail
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    ) : (
+      <div className="text-center py-12 text-slate-500 border border-dashed border-slate-800 rounded-xl">
+        Belum ada poster success story.
+      </div>
+    )}
+  </div>
+)}
+
 
       {/* --- MODAL LOKER (REDESIGN: SPLIT VIEW) --- */}
       {selectedLoker && (
@@ -2016,6 +2281,27 @@ function LakonDasamukaPage({ dbInstance, kejuruanOptions, lokerData, produkData 
              </div>
         </div>
       )}
+
+      {/* --- MODAL SUCCESS STORY (GAMBAR FULL SCREEN) --- */}
+      {selectedStory && (
+        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-2 md:p-4 animate-fade-in" onClick={() => setSelectedStory(null)}>
+             <div className="relative max-w-4xl w-full h-auto max-h-[90vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+                 
+                 {/* Tombol Close */}
+                 <button onClick={() => setSelectedStory(null)} className="absolute -top-10 right-0 md:-right-10 p-2 text-white/70 hover:text-white transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                 </button>
+
+                 {/* Gambar Full */}
+                 <img 
+                    src={getEmbedLink(selectedStory.image)} 
+                    alt="Success Story Full" 
+                    className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl border border-white/10"
+                 />
+             </div>
+        </div>
+      )}
+
     </section>
   );
 }
@@ -2659,7 +2945,10 @@ function App() {
   const [pesertaData, setPesertaData] = useState([]);
   const [lokerData, setLokerData] = useState([]);
   const [produkData, setProdukData] = useState([]);
+  const [successStoriesData, setSuccessStoriesData] = useState([]);
   const [kejuruanOptions, setKejuruanOptions] = useState(["Semua"]);
+  const [announcementData, setAnnouncementData] = useState([]);
+  const [activityData, setActivityData] = useState([]);
 
   // Listen Auth State Realtime
   useEffect(() => {
@@ -2827,6 +3116,43 @@ useEffect(() => {
     return () => unsubscribe();
     }, []);
 
+// Dengarkan Success Stories dari Firestore
+  useEffect(() => {
+    if (!db) return;
+
+    const q = query(getSuccessStoriesCollection(db), orderBy("createdAt", "desc"));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        const items = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setSuccessStoriesData(items);
+      }, (err) => console.error("Error fetch stories:", err)
+    );
+    return () => unsubscribe();
+  }, []);
+ 
+// Fetch Pengumuman / Flyer
+  useEffect(() => {
+    if (!db) return;
+    const q = query(getAnnouncementsCollection(db), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        setAnnouncementData(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch Update Kegiatan
+  useEffect(() => {
+    if (!db) return;
+    const q = query(getActivityUpdatesCollection(db), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        setActivityData(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
+  }, []);
+
   const handleLogout = async () => {
     if (auth) {
         // Tandai bahwa user ingin mode tamu (disimpan di browser)
@@ -2846,8 +3172,20 @@ useEffect(() => {
   };
 
   const renderPage = () => {
-    if (currentPage === "beranda") return <BerandaPage allStatsData={allStatsData} staticStatsData={[]} allScheduleData={allScheduleData} galleryData={galleryData} kejuruanOptions={kejuruanOptions} isLoading={isLoading} error={error} setCurrentPage={setCurrentPage}/>;
-    if (currentPage === "dasamuka") return <LakonDasamukaPage dbInstance={db} kejuruanOptions={kejuruanOptions} lokerData={lokerData} produkData={produkData} />;
+    if (currentPage === "beranda") return <BerandaPage 
+        allStatsData={allStatsData} 
+        staticStatsData={[]} 
+        allScheduleData={allScheduleData} 
+        galleryData={galleryData} 
+        kejuruanOptions={kejuruanOptions} 
+        isLoading={isLoading} 
+        error={error} 
+        setCurrentPage={setCurrentPage}
+        // TAMBAHAN BARU:
+        announcementData={announcementData}
+        activityData={activityData}
+    />;    
+    if (currentPage === "dasamuka") return <LakonDasamukaPage dbInstance={db} kejuruanOptions={kejuruanOptions} lokerData={lokerData} produkData={produkData} successStoriesData={successStoriesData} />;    
     if (currentPage === "panduan") return <PanduanPage db={db} onBack={() => setCurrentPage("beranda")} />;
 
     // UPDATE: Hapus force_guest_mode saat login berhasil
@@ -2858,7 +3196,18 @@ useEffect(() => {
     }} />;
     
     // REVISI: Pastikan hanya user NON-ANONYMOUS yang bisa akses dashboard
-    if (currentPage === "dashboard") return (user && !user.isAnonymous) ? <DashboardPage user={user} pesertaData={pesertaData} kejuruanOptions={kejuruanOptions} isLoading={isLoading} error={error} onBackToHome={() => setCurrentPage('beranda')} /> : <LoginPage onLogin={(u) => {
+    if (currentPage === "dashboard") return (user && !user.isAnonymous) ?
+        <DashboardPage 
+            user={user} 
+            pesertaData={pesertaData} 
+            kejuruanOptions={kejuruanOptions} 
+            isLoading={isLoading} 
+            error={error} 
+            onBackToHome={() => setCurrentPage('beranda')}
+            // TAMBAHAN BARU:
+            announcementData={announcementData}
+            activityData={activityData}
+        /> : <LoginPage onLogin={(u) => {        
         localStorage.removeItem('force_guest_mode');
         setUser(u); 
         setCurrentPage("dashboard");
