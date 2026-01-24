@@ -377,6 +377,7 @@ function Navbar({ setCurrentPage, user, onLogout }) {
           <nav className="hidden md:flex gap-6 text-sm items-center text-slate-200">
             <button onClick={() => setCurrentPage("beranda")} className="hover:text-emerald-300 transition-colors font-medium">Beranda</button>
             <button onClick={() => setCurrentPage("dasamuka")} className="hover:text-emerald-300 transition-colors font-medium">Lakon Dasamuka</button>
+            <button onClick={() => setCurrentPage("sertifikat")} className="hover:text-emerald-300 transition-colors font-medium">E-Sertifikat</button>
             {user && !user.isAnonymous ? (
               <div className="flex items-center gap-4">
                 <button onClick={() => setCurrentPage("dashboard")} className="text-emerald-400 font-bold border border-emerald-500/50 rounded-full px-4 py-1.5 hover:bg-emerald-500/10 transition-all">Dashboard Admin</button>
@@ -2617,6 +2618,119 @@ function PanduanPage({ onBack, db }) { // Pastikan menerima props 'db'
   );
 }
 
+// --- HALAMAN E-SERTIFIKAT (NEW) ---
+function SertifikatPage({ pesertaData, onBack }) {
+    const [searchId, setSearchId] = useState("");
+    const [result, setResult] = useState(null);
+    const [hasSearched, setHasSearched] = useState(false);
+
+    const handleSearch = (e) => {
+        e.preventDefault();
+        if (!searchId.trim()) return;
+
+        // Cari peserta berdasarkan kolom 'no_peserta'
+        // Normalisasi: hapus spasi & lowercase agar pencarian tidak sensitif huruf besar/kecil
+        const found = pesertaData.find(p => 
+            p.no_peserta && p.no_peserta.toLowerCase().trim() === searchId.toLowerCase().trim()
+        );
+
+        setResult(found || null);
+        setHasSearched(true);
+    };
+
+    return (
+        <section className="pt-28 pb-20 min-h-screen bg-slate-950 flex flex-col items-center px-4">
+            <div className="w-full max-w-2xl animate-fade-in-up">
+                
+                {/* HEADER */}
+                <div className="text-center mb-10">
+                    <div className="inline-block p-4 rounded-full bg-emerald-500/10 mb-4 border border-emerald-500/20">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </div>
+                    <h1 className="text-3xl md:text-4xl font-extrabold text-white mb-2">Cek E-Sertifikat</h1>
+                    <p className="text-slate-400">Masukkan Nomor Peserta Anda untuk mengunduh sertifikat pelatihan.</p>
+                </div>
+
+                {/* SEARCH BOX */}
+                <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl mb-8">
+                    <form onSubmit={handleSearch} className="flex flex-col gap-4">
+                        <div>
+                            <label className="text-xs font-bold text-slate-300 uppercase tracking-wide ml-1 mb-2 block">Nomor Peserta</label>
+                            <input 
+                                type="text" 
+                                value={searchId}
+                                onChange={(e) => {setSearchId(e.target.value); setHasSearched(false);}}
+                                placeholder="Contoh: BLK-25-001" 
+                                className="w-full p-4 bg-slate-950 border border-slate-700 rounded-xl text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none transition-all font-mono text-lg"
+                            />
+                        </div>
+                        <button type="submit" className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-900/20 transition-all transform hover:-translate-y-1">
+                            🔍 Cek Status Sertifikat
+                        </button>
+                    </form>
+                </div>
+
+                {/* HASIL PENCARIAN */}
+                {hasSearched && (
+                    <div className="animate-fade-in">
+                        {result ? (
+                            <div className="bg-gradient-to-br from-emerald-900/20 to-slate-900 border border-emerald-500/50 rounded-2xl p-6 md:p-8 relative overflow-hidden text-center md:text-left">
+                                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -z-10"></div>
+                                
+                                <div className="flex flex-col md:flex-row items-center gap-6">
+                                    <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center border-4 border-slate-900 shadow-xl shrink-0">
+                                        <span className="text-3xl">👨‍🎓</span>
+                                    </div>
+                                    <div className="flex-1">
+                                        <h2 className="text-2xl font-bold text-white mb-1">{result.nama}</h2>
+                                        <p className="text-emerald-400 font-medium mb-1">{result.kejuruan}</p>
+                                        <p className="text-slate-400 text-sm">Angkatan/Tahun: {result.tahun}</p>
+                                    </div>
+                                </div>
+
+                                <div className="mt-8 pt-6 border-t border-white/10 flex flex-col md:flex-row gap-4 justify-between items-center">
+                                    <div className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 px-4 py-2 rounded-lg border border-emerald-500/20">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                                        <span className="font-bold text-sm">LULUS / KOMPETEN</span>
+                                    </div>
+
+                                    {/* TOMBOL DOWNLOAD */}
+                                    {result.link_sertifikat ? (
+                                        <button 
+                                            onClick={() => window.open(convertToEmbedLink(result.link_sertifikat), '_blank')}
+                                            className="px-6 py-3 bg-white text-slate-900 hover:bg-slate-200 font-bold rounded-xl shadow-lg flex items-center gap-2 transition-colors w-full md:w-auto justify-center"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4-4m0 0l-4 4m4-4v12" /></svg>
+                                            Download Sertifikat (PDF)
+                                        </button>
+                                    ) : (
+                                        <button disabled className="px-6 py-3 bg-slate-800 text-slate-500 font-bold rounded-xl cursor-not-allowed border border-slate-700 w-full md:w-auto">
+                                            Sertifikat Belum Tersedia
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-red-900/20 border border-red-500/50 rounded-2xl p-8 text-center">
+                                <h3 className="text-xl font-bold text-red-400 mb-2">Data Tidak Ditemukan 😔</h3>
+                                <p className="text-slate-300">Nomor Peserta <span className="font-mono bg-black/30 px-2 py-0.5 rounded text-white">{searchId}</span> tidak terdaftar atau salah ketik.</p>
+                                <p className="text-slate-500 text-sm mt-4">Silakan periksa kembali kartu peserta Anda atau hubungi Admin.</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                <div className="mt-12 text-center">
+                    <button onClick={onBack} className="text-slate-400 hover:text-white text-sm underline flex items-center justify-center gap-2 mx-auto">
+                        ← Kembali ke Beranda
+                    </button>
+                </div>
+            </div>
+        </section>
+    );
+}
+
+
 // --- FOOTER, LOGIN, DLL ---
 function Footer() {
   const [newComment, setNewComment] = useState("");
@@ -3185,6 +3299,7 @@ useEffect(() => {
         announcementData={announcementData}
         activityData={activityData}
     />;    
+    if (currentPage === "sertifikat") return <SertifikatPage pesertaData={pesertaData} onBack={() => setCurrentPage("beranda")} />;
     if (currentPage === "dasamuka") return <LakonDasamukaPage dbInstance={db} kejuruanOptions={kejuruanOptions} lokerData={lokerData} produkData={produkData} successStoriesData={successStoriesData} />;    
     if (currentPage === "panduan") return <PanduanPage db={db} onBack={() => setCurrentPage("beranda")} />;
 
@@ -3212,6 +3327,7 @@ useEffect(() => {
         setUser(u); 
         setCurrentPage("dashboard");
     }} />;
+
     return null;
   };
 
