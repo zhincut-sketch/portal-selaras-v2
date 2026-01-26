@@ -1449,8 +1449,7 @@ function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryDa
       {/* --- BAGIAN BARU 1: PENGUMUMAN / FLYER --- */}
       {announcementData && announcementData.length > 0 && (
         <section className="py-12 bg-slate-950 border-b border-white/5 relative overflow-hidden">
-            {/* Background Effect */}
-            <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-[80px] -z-10"></div>
+            {/* ... (kode hiasan background biarkan saja) ... */}
             
             <div className="max-w-6xl mx-auto px-4">
                 <div className="flex items-center gap-3 mb-8">
@@ -1459,21 +1458,28 @@ function BerandaPage({ allStatsData, staticStatsData, allScheduleData, galleryDa
                 </div>
 
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {announcementData.map((item) => (
+                    {/* 👇 INI BAGIAN YANG DIUPDATE (DITAMBAH .filter) 👇 */}
+                    {announcementData
+                        .filter(item => item.image && item.image.trim() !== "") // HANYA TAMPILKAN JIKA ADA GAMBAR
+                        .map((item) => (
                         <div key={item.id} className="group relative rounded-2xl overflow-hidden shadow-2xl border border-slate-800 hover:border-emerald-500/50 transition-all">
                             <img 
                                 src={getEmbedLink(item.image)} 
                                 alt="Flyer Pengumuman" 
                                 className="w-full h-auto object-cover transform group-hover:scale-105 transition-transform duration-500"
-                                onError={(e) => e.target.src = "https://placehold.co/600x800?text=Flyer+Image"}
+                                onError={(e) => e.target.style.display = 'none'} // Sembunyikan jika link error/rusak
                             />
-                            {/* Efek Kilau saat hover */}
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-6">
                                 <button onClick={() => window.open(getEmbedLink(item.image), '_blank')} className="w-full py-2 bg-emerald-600 text-white font-bold rounded-lg text-sm shadow-lg">Lihat Full Gambar</button>
                             </div>
                         </div>
                     ))}
                 </div>
+                
+                {/* Opsi Tambahan: Jika setelah difilter ternyata kosong semua, sembunyikan section atau tampilkan pesan */}
+                {announcementData.filter(i => i.image && i.image.trim() !== "").length === 0 && (
+                    <p className="text-slate-500 italic text-sm">Belum ada pengumuman aktif saat ini.</p>
+                )}
             </div>
         </section>
       )}
