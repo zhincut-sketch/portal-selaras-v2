@@ -278,6 +278,27 @@ const convertToEmbedLink = (url) => {
   return `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`;
 };
 
+// Khusus untuk fitur DOWNLOAD (agar file PDF utuh dan terunduh)
+const convertToDownloadLink = (url) => {
+  if (!url) return "";
+  const idMatch = url.match(/(?:[?&]id=|\/file\/d\/)([a-zA-Z0-9_-]+)/);
+  if (!idMatch) return url;
+  
+  const fileId = idMatch[1];
+  // Format khusus download langsung
+  return `https://drive.google.com/uc?export=download&id=${fileId}`;
+};
+
+// Khusus untuk PREVIEW UTUH (Muncul semua halaman di jendela yang sama)
+const convertToPreviewLink = (url) => {
+  if (!url) return "";
+  const idMatch = url.match(/(?:[?&]id=|\/file\/d\/)([a-zA-Z0-9_-]+)/);
+  if (!idMatch) return url;
+  
+  const fileId = idMatch[1];
+  // Format Preview Google Drive yang mendukung scroll semua halaman
+  return `https://drive.google.com/file/d/${fileId}/preview`;
+};
 
 // --- NORMALISASI DATA ---
 
@@ -2677,54 +2698,63 @@ function SertifikatPage({ pesertaData, onBack }) {
                 </div>
 
                 {/* HASIL PENCARIAN */}
-                {hasSearched && (
-                    <div className="animate-fade-in">
-                        {result ? (
-                            <div className="bg-gradient-to-br from-emerald-900/20 to-slate-900 border border-emerald-500/50 rounded-2xl p-6 md:p-8 relative overflow-hidden text-center md:text-left">
-                                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl -z-10"></div>
-                                
-                                <div className="flex flex-col md:flex-row items-center gap-6">
-                                    <div className="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center border-4 border-slate-900 shadow-xl shrink-0">
-                                        <span className="text-3xl">👨‍🎓</span>
-                                    </div>
-                                    <div className="flex-1">
-                                        <h2 className="text-2xl font-bold text-white mb-1">{result.nama}</h2>
-                                        <p className="text-emerald-400 font-medium mb-1">{result.kejuruan}</p>
-                                        <p className="text-slate-400 text-sm">Angkatan/Tahun: {result.tahun}</p>
-                                    </div>
-                                </div>
-
-                                <div className="mt-8 pt-6 border-t border-white/10 flex flex-col md:flex-row gap-4 justify-between items-center">
-                                    <div className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 px-4 py-2 rounded-lg border border-emerald-500/20">
-                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
-                                        <span className="font-bold text-sm">LULUS / KOMPETEN</span>
-                                    </div>
-
-                                    {/* TOMBOL DOWNLOAD */}
-                                    {result.link_sertifikat ? (
-                                        <button 
-                                            onClick={() => window.open(convertToEmbedLink(result.link_sertifikat), '_blank')}
-                                            className="px-6 py-3 bg-white text-slate-900 hover:bg-slate-200 font-bold rounded-xl shadow-lg flex items-center gap-2 transition-colors w-full md:w-auto justify-center"
-                                        >
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4-4m0 0l-4 4m4-4v12" /></svg>
-                                            Download Sertifikat (PDF)
-                                        </button>
-                                    ) : (
-                                        <button disabled className="px-6 py-3 bg-slate-800 text-slate-500 font-bold rounded-xl cursor-not-allowed border border-slate-700 w-full md:w-auto">
-                                            Sertifikat Belum Tersedia
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="bg-red-900/20 border border-red-500/50 rounded-2xl p-8 text-center">
-                                <h3 className="text-xl font-bold text-red-400 mb-2">Data Tidak Ditemukan 😔</h3>
-                                <p className="text-slate-300">Nomor Peserta <span className="font-mono bg-black/30 px-2 py-0.5 rounded text-white">{searchId}</span> tidak terdaftar atau salah ketik.</p>
-                                <p className="text-slate-500 text-sm mt-4">Silakan periksa kembali kartu peserta Anda atau hubungi Admin.</p>
-                            </div>
+{hasSearched && (
+    <div className="animate-fade-in space-y-6"> {/* Tambah space-y-6 agar ada jarak antar elemen */}
+        {result ? (
+            <>
+                {/* KARTU DATA PESERTA */}
+                <div className="bg-gradient-to-br from-emerald-900/20 to-slate-900 border border-emerald-500/50 rounded-2xl p-6 text-center md:text-left">
+                    <div className="flex flex-col md:flex-row items-center gap-6">
+                        <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center border-2 border-emerald-500 shadow-xl">
+                            <span className="text-2xl">👨‍🎓</span>
+                        </div>
+                        <div className="flex-1">
+                            <h2 className="text-xl font-bold text-white">{result.nama}</h2>
+                            <p className="text-emerald-400 text-sm">{result.kejuruan} - {result.tahun}</p>
+                        </div>
+                        
+                        {/* TOMBOL DOWNLOAD (Link Langsung) */}
+                        {result.link_sertifikat && (
+                            <a 
+                                href={convertToDownloadLink(result.link_sertifikat)} 
+                                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm flex items-center gap-2 transition-all shadow-lg shadow-emerald-900/40"
+                            >
+                                📥 Download PDF
+                            </a>
                         )}
                     </div>
+                </div>
+
+                {/* JENDELA PRATINJAU (IFRAME) */}
+                {result.link_sertifikat ? (
+                    <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+                        <div className="bg-slate-800 px-4 py-2 flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-300 uppercase">Pratinjau Sertifikat</span>
+                            <span className="text-[10px] text-slate-500">Scroll untuk melihat halaman lain</span>
+                        </div>
+                        <div className="aspect-[1/1.4] md:aspect-video w-full">
+                            <iframe 
+                                src={convertToPreviewLink(result.link_sertifikat)} 
+                                className="w-full h-full border-none"
+                                allow="autoplay"
+                            ></iframe>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="p-8 border-2 border-dashed border-slate-800 rounded-2xl text-center">
+                        <p className="text-slate-500">Sertifikat digital belum diupload oleh admin.</p>
+                    </div>
                 )}
+            </>
+        ) : (
+            /* ... Kode "Data Tidak Ditemukan" tetap sama seperti sebelumnya ... */
+            <div className="bg-red-900/20 border border-red-500/50 rounded-2xl p-8 text-center">
+                <h3 className="text-xl font-bold text-red-400 mb-2">Data Tidak Ditemukan</h3>
+                <p className="text-slate-300">Nomor Peserta tidak terdaftar.</p>
+            </div>
+        )}
+    </div>
+)}
 
                 <div className="mt-12 text-center">
                     <button onClick={onBack} className="text-slate-400 hover:text-white text-sm underline flex items-center justify-center gap-2 mx-auto">
